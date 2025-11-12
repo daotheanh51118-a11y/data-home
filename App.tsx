@@ -1415,44 +1415,44 @@ export const App: React.FC = () => {
       case 'trang-chu':
         return (
           <div className="w-full max-w-7xl mx-auto text-center">
-             <h1 className="text-5xl sm:text-6xl font-extrabold text-slate-900 tracking-wide">TRANG HỖ TRỢ CÔNG VIỆC</h1>
+             <h1 className="text-6xl sm:text-7xl font-extrabold text-slate-900 tracking-wide">TRANG HỖ TRỢ CÔNG VIỆC</h1>
              <div className="mt-12 flex flex-row flex-nowrap items-stretch justify-center gap-6 text-center">
                 
-                <div onClick={() => setCurrentPage('kiem-quy')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-indigo-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
-                    <div className="flex-shrink-0 bg-slate-100 text-slate-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-indigo-100 group-hover:text-indigo-600">
+                <div onClick={() => setCurrentPage('kiem-quy')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-blue-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                    <div className="flex-shrink-0 bg-blue-100 text-blue-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-blue-200">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                     </div>
-                    <h2 className="text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors duration-300">Kiểm Quỹ Thu Ngân</h2>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-blue-600 transition-colors duration-300">Kiểm Quỹ Thu Ngân</h2>
                 </div>
 
-                <div onClick={() => setCurrentPage('kiem-ke')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-indigo-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
-                    <div className="flex-shrink-0 bg-slate-100 text-slate-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-indigo-100 group-hover:text-indigo-600">
+                <div onClick={() => setCurrentPage('kiem-ke')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-green-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                    <div className="flex-shrink-0 bg-green-100 text-green-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-green-200">
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
                     </div>
-                    <h2 className="text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors duration-300">Kiểm Kê Hàng Hóa</h2>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-green-600 transition-colors duration-300">Kiểm Kê Hàng Hóa</h2>
                 </div>
                 
-                 <div onClick={() => setCurrentPage('kiem-tra-ton-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-indigo-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
-                    <div className="flex-shrink-0 bg-slate-100 text-slate-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-indigo-100 group-hover:text-indigo-600">
+                 <div onClick={() => setCurrentPage('kiem-tra-ton-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-amber-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                    <div className="flex-shrink-0 bg-amber-100 text-amber-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-amber-200">
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                     </div>
-                    <h2 className="text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors duration-300">Kiểm Tra Tồn Kho</h2>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-amber-600 transition-colors duration-300">Kiểm Tra Tồn Kho</h2>
                 </div>
 
-                <div onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-indigo-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
-                    <div className="flex-shrink-0 bg-slate-100 text-slate-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-indigo-100 group-hover:text-indigo-600">
+                <div onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-cyan-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                    <div className="flex-shrink-0 bg-cyan-100 text-cyan-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-cyan-200">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     </div>
-                    <h2 className="text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors duration-300">Kiểm Hàng Chuyển Kho</h2>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-cyan-600 transition-colors duration-300">Kiểm Hàng Chuyển Kho</h2>
                 </div>
                 
-                <div onClick={() => setCurrentPage('thay-posm')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-indigo-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
-                    <div className="flex-shrink-0 bg-slate-100 text-slate-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-indigo-100 group-hover:text-indigo-600">
+                <div onClick={() => setCurrentPage('thay-posm')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-purple-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                    <div className="flex-shrink-0 bg-purple-100 text-purple-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-purple-200">
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
                     </div>
-                    <h2 className="text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors duration-300">Thay POSM</h2>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-purple-600 transition-colors duration-300">Thay POSM</h2>
                 </div>
              </div>
           </div>
