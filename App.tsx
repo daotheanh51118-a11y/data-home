@@ -1,0 +1,2334 @@
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+
+// --- Type Declarations ---
+declare global {
+  interface Window {
+    XLSX: any;
+    QRCode: any;
+  }
+}
+
+type Page = 'trang-chu' | 'kiem-quy' | 'kiem-tra-ton-kho' | 'kiem-ke' | 'thong-tin' | 'kiem-hang-chuyen-kho' | 'thay-posm';
+
+type InventoryItem = {
+  qrCode: string; // The primary value for QR code generation (IMEI if present, else Product Code)
+  productCodeForSearch: string; // Always store the product code for searching purposes
+  productName: string;
+  quantity: number;
+  price: number;
+  checked: boolean;
+  hasImei: boolean;
+  status: string;
+  category: string;
+};
+
+type ExcelCheckItem = {
+  productCode: string;
+  productName: string;
+  fileQuantity: number;
+  actualQuantity: number | null; // null means not yet counted
+  imei?: string;
+  category: string;
+};
+
+type FundCheckResult = {
+  id: number; // Using timestamp for a unique ID
+  checkTime: Date;
+  targetFund: number;
+  smallChange: number;
+  adjustedTargetFund: number;
+  totalCash: number;
+  difference: number;
+  counts: Record<number, number>;
+  subtotals: Record<number, number>;
+};
+
+type PosmChangeItem = {
+  productCode: string;
+  productName: string;
+  oldPrice: number;
+  newPrice: number;
+  promotion?: string;
+  bonusPoint?: string;
+};
+
+
+// --- Helper Functions ---
+const denominations = [
+  { value: 500000 }, { value: 200000 }, { value: 100000 }, { value: 50000 },
+  { value: 20000 }, { value: 10000 }, { value: 5000 }, { value: 2000 }, { value: 1000 },
+];
+
+const formatCurrency = (value: number) => {
+  if (isNaN(value)) {
+    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(0);
+  }
+  return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value);
+};
+
+const formatNumber = (value: number | undefined | null) => {
+    if (value === undefined || value === null || value === 0) return '';
+    return new Intl.NumberFormat('vi-VN').format(value);
+}
+
+const parseFormattedNumber = (value: string): number => {
+    const rawValue = String(value).replace(/\D/g, '');
+    const number = parseInt(rawValue, 10);
+    return isNaN(number) ? 0 : number;
+}
+
+const findValue = (row: any, keys: string[]): any => {
+    for (const targetKey of keys) {
+        const lowerTargetKey = targetKey.toLowerCase().trim();
+        for (const rowKey in row) {
+            if (row.hasOwnProperty(rowKey) && rowKey.toLowerCase().trim() === lowerTargetKey) {
+                return row[rowKey];
+            }
+        }
+    }
+    return undefined;
+};
+
+const parseProductNameForPosm = (name: string): string => {
+    if (!name) return '';
+
+    const specRegex = /\b\d+(\.\d+)?(L(ÍT)?|KG)\b/i;
+    const junkKeywords = ['INVERTER', 'LĐ'];
+    const parts = name.split('|');
+
+    let specPart = '';
+    const mainParts: string[] = [];
+
+    parts.forEach(part => {
+        const currentPart = part.trim();
+        if (!specPart && specRegex.test(currentPart)) {
+            specPart = currentPart;
+        } else if (junkKeywords.some(keyword => currentPart.toUpperCase() === keyword)) {
+            // Bỏ qua các từ khóa không cần thiết
+        } else {
+            mainParts.push(currentPart);
+        }
+    });
+
+    const baseName = mainParts.join('|');
+    
+    if (specPart) {
+        return `${baseName} (${specPart})`;
+    }
+
+    return baseName;
+};
+
+const getCategoryFromProductName = (name: string): string => {
+    const lowerName = name.toLowerCase();
+    if (lowerName.includes('tivi') || lowerName.includes('ti vi') || /\btv\b/.test(lowerName)) return 'tivi';
+    if (lowerName.includes('tủ lạnh')) return 'tủ lạnh';
+    if (lowerName.includes('máy giặt')) return 'máy giặt';
+    if (lowerName.includes('máy lạnh') || lowerName.includes('điều hòa')) return 'máy lạnh';
+    if (lowerName.includes('điện thoại')) return 'điện thoại';
+    return 'default';
+};
+
+const getIconSvg = (category: string, className: string = "") => {
+    const lowerCategory = category.toLowerCase();
+    if (lowerCategory.includes('tivi') || lowerCategory.includes('ti vi') || /\btv\b/.test(lowerCategory)) {
+        return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2" /><polyline points="16 3 12 7 8 3" /></svg>`;
+    }
+    if (lowerCategory.includes('tủ lạnh')) {
+        return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M5 10h14" /><path d="M9 6v2" /><path d="M9 14v2" /></svg>`;
+    }
+    if (lowerCategory.includes('máy giặt')) {
+        return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><circle cx="12" cy="14" r="4" /><path d="M8 6h.01" /><path d="M11 6h.01" /><path d="M14 6h.01" /></svg>`;
+    }
+    if (lowerCategory.includes('máy lạnh') || lowerCategory.includes('điều hòa')) {
+        return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h18a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-18a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1z" /><path d="M7 16h4" /><path d="M14 16h3" /></svg>`;
+    }
+     if (lowerCategory.includes('điện thoại')) {
+        return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>`;
+    }
+    if (lowerCategory.includes('gift')) {
+         return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1" /><line x1="12" y1="8" x2="12" y2="21" /><path d="M19 12v7a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-7" /><path d="M7.5 8a2.5 2.5 0 0 1 0 -5a4.8 8 0 0 1 4.5 5a4.8 8 0 0 1 4.5 -5a2.5 2.5 0 0 1 0 5" /></svg>`;
+    }
+    // Default Icon
+    return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>`;
+};
+
+
+// --- Reusable Components ---
+const StatCard: React.FC<{ title: string; value: string | number; className?: string; }> = ({ title, value, className }) => (
+    <div className={`bg-white p-4 rounded-lg shadow-sm border border-slate-200 ${className}`}>
+        <p className="text-sm font-medium text-slate-500">{title}</p>
+        <p className="text-2xl font-bold font-mono text-slate-800 tracking-tight">{value}</p>
+    </div>
+);
+
+const QRCodeComponent: React.FC<{ text: string, size?: number }> = ({ text, size = 64 }) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+
+    useEffect(() => {
+        if (canvasRef.current && text) {
+            window.QRCode.toCanvas(canvasRef.current, text, { width: size, margin: 1 }, (error: any) => {
+                if (error) console.error(error);
+            });
+        }
+    }, [text, size]);
+
+    return <canvas ref={canvasRef} style={{ width: `${size}px`, height: `${size}px` }} />;
+};
+
+const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ category, className="h-4 w-4" }) => {
+    const lowerCategory = category.toLowerCase();
+    
+    if (lowerCategory.includes('tivi') || lowerCategory.includes('ti vi') || /\btv\b/.test(lowerCategory)) {
+        return <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="7" width="18" height="13" rx="2" /><polyline points="16 3 12 7 8 3" /></svg>;
+    }
+    if (lowerCategory.includes('tủ lạnh')) {
+        return <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M5 10h14" /><path d="M9 6v2" /><path d="M9 14v2" /></svg>;
+    }
+    if (lowerCategory.includes('máy giặt')) {
+        return <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><circle cx="12" cy="14" r="4" /><path d="M8 6h.01" /><path d="M11 6h.01" /><path d="M14 6h.01" /></svg>;
+    }
+    if (lowerCategory.includes('máy lạnh') || lowerCategory.includes('điều hòa')) {
+        return <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h18a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-18a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1z" /><path d="M7 16h4" /><path d="M14 16h3" /></svg>;
+    }
+    if (lowerCategory.includes('điện thoại')) {
+        return <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>;
+    }
+    // Default Icon
+    return <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
+};
+
+// --- Main App Component ---
+export const App: React.FC = () => {
+  const [currentPage, setCurrentPage] = useState<Page>('trang-chu');
+  
+  // State for Kiem Quy
+  const [counts, setCounts] = useState<Record<number, number>>(
+    denominations.reduce<Record<number, number>>((acc, d) => ({ ...acc, [d.value]: 0 }), {})
+  );
+  const [targetFund, setTargetFund] = useState<number>(0);
+  const [smallChange, setSmallChange] = useState<number>(0);
+  const [lastResetTime, setLastResetTime] = useState<Date | null>(null);
+  const [savedFundChecks, setSavedFundChecks] = useState<FundCheckResult[]>([]);
+  const [showHistory, setShowHistory] = useState<boolean>(false);
+
+  // State for Kiem Ke & Kiem Tra Ton Kho
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [fileName, setFileName] = useState<string>('');
+  const [hoveredRowIndex, setHoveredRowIndex] = useState<number | null>(null);
+  const [imeiFilter, setImeiFilter] = useState<'all' | 'with_imei' | 'without_imei'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | string>('all');
+  const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+
+  // State for Kiem Tra Ton Kho
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchHistory, setSearchHistory] = useState<{ query: string; result: InventoryItem | null }[]>([]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [suggestions, setSuggestions] = useState<(InventoryItem & { originalIndex: number })[]>([]);
+  const [isSuggestionsVisible, setIsSuggestionsVisible] = useState(false);
+
+  // State for Kiem Hang Chuyen Kho
+  const [excelCheckItems, setExcelCheckItems] = useState<ExcelCheckItem[]>([]);
+  const [excelCheckFileName, setExcelCheckFileName] = useState<string>('');
+  const [scanQuery, setScanQuery] = useState('');
+  const scanInputRef = useRef<HTMLInputElement>(null);
+  const [lastScannedIndex, setLastScannedIndex] = useState<number | null>(null);
+  const [scanStatus, setScanStatus] = useState<{type: 'idle' | 'success' | 'error', message: string}>({type: 'idle', message: 'Sẵn sàng quét...'});
+
+  // State for Thay POSM
+  const [posmItems, setPosmItems] = useState<PosmChangeItem[]>([]);
+  const [posmFileName, setPosmFileName] = useState<string>('');
+  const [selectedPosmItems, setSelectedPosmItems] = useState<string[]>([]);
+
+  
+  useEffect(() => {
+    try {
+        const savedData = localStorage.getItem('fundCheckHistory');
+        if (savedData) {
+            const parsedData = JSON.parse(savedData).map((item: any) => ({
+                ...item,
+                checkTime: new Date(item.checkTime)
+            }));
+            setSavedFundChecks(parsedData);
+        }
+    } catch (error) {
+        console.error("Failed to load fund check history:", error);
+        setSavedFundChecks([]);
+    }
+  }, []);
+  
+  useEffect(() => {
+    if (currentPage === 'kiem-tra-ton-kho' && searchQuery.trim().length > 1) {
+        const lowerCaseQuery = searchQuery.toLowerCase();
+        const filteredSuggestions = inventoryItems
+            .map((item, index) => ({ ...item, originalIndex: index }))
+            .filter(item =>
+                item.productName.toLowerCase().includes(lowerCaseQuery)
+            ).slice(0, 7); // Limit to 7 results
+        
+        setSuggestions(filteredSuggestions);
+        setIsSuggestionsVisible(filteredSuggestions.length > 0);
+    } else {
+        setSuggestions([]);
+        setIsSuggestionsVisible(false);
+    }
+}, [searchQuery, inventoryItems, currentPage]);
+
+    useEffect(() => {
+        if (currentPage === 'kiem-hang-chuyen-kho' && excelCheckItems.length > 0) {
+            scanInputRef.current?.focus();
+        }
+    }, [currentPage, excelCheckItems.length]);
+
+
+  // --- Kiem Quy Logic ---
+  const handleCountChange = (denomination: number, value: string | number) => {
+    const newCount = typeof value === 'string' ? parseInt(value, 10) : value;
+    setCounts(prevCounts => ({
+      ...prevCounts,
+      [denomination]: isNaN(newCount) || newCount < 0 ? 0 : newCount,
+    }));
+  };
+  
+  const handleTargetFundChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setTargetFund(parseFormattedNumber(e.target.value));
+  };
+  
+  const handleSmallChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setSmallChange(parseFormattedNumber(e.target.value));
+  };
+
+  const subtotals = useMemo(() => {
+    return denominations.reduce<Record<number, number>>((acc, d) => ({
+      ...acc,
+      [d.value]: d.value * (counts[d.value] || 0)
+    }), {});
+  }, [counts]);
+  
+  const totalCash = useMemo(() => {
+      return Object.values(subtotals).reduce((sum: number, val: number) => sum + val, 0);
+  }, [subtotals]);
+
+  const adjustedTargetFund = useMemo(() => {
+    return targetFund - smallChange;
+  }, [targetFund, smallChange]);
+
+  const difference = useMemo(() => {
+      return totalCash - adjustedTargetFund;
+  }, [totalCash, adjustedTargetFund]);
+
+  const handleReset = () => {
+    setCounts(denominations.reduce<Record<number, number>>((acc, d) => ({ ...acc, [d.value]: 0 }), {}));
+    setTargetFund(0);
+    setSmallChange(0);
+    setLastResetTime(new Date());
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, currentIndex: number) => {
+    if (event.key === 'Enter' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const nextIndex = currentIndex + 1;
+      if (nextIndex < denominations.length) {
+        const nextDenom = denominations[nextIndex].value;
+        const nextInput = document.getElementById(`denom-${nextDenom}`);
+        if (nextInput) {
+          nextInput.focus();
+        }
+      } else if (event.key === 'Enter') {
+        // After last input, Enter focuses the Save button
+        const saveButton = document.getElementById('save-button');
+        if (saveButton) {
+          saveButton.focus();
+        }
+      }
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      const prevIndex = currentIndex - 1;
+      if (prevIndex >= 0) {
+        const prevDenom = denominations[prevIndex].value;
+        const prevInput = document.getElementById(`denom-${prevDenom}`);
+        if (prevInput) {
+          prevInput.focus();
+        }
+      }
+    }
+  };
+
+  const getDifferenceColor = () => {
+    if (difference === 0) return 'text-green-600 bg-green-100/80 border-green-200';
+    if (difference > 0) return 'text-amber-600 bg-amber-100/80 border-amber-200';
+    return 'text-red-600 bg-red-100/80 border-red-200';
+  }
+
+  const getDifferenceLabel = () => {
+    if (difference > 0) return 'Chênh Lệch (Dư)';
+    if (difference < 0) return 'Chênh Lệch (Thiếu)';
+    return 'Chênh Lệch (Khớp)';
+  }
+
+  const handleSave = () => {
+    const now = new Date();
+    const resultData: FundCheckResult = {
+        id: now.getTime(),
+        checkTime: lastResetTime || now,
+        targetFund,
+        smallChange,
+        adjustedTargetFund,
+        totalCash,
+        difference,
+        counts,
+        subtotals,
+    };
+    const updatedHistory = [resultData, ...savedFundChecks];
+    setSavedFundChecks(updatedHistory);
+    localStorage.setItem('fundCheckHistory', JSON.stringify(updatedHistory));
+    alert('Đã lưu kết quả kiểm quỹ thành công!');
+  };
+
+  const handlePrint = () => {
+    const printContent = `
+      <html><head><title>Biên Bản Kiểm Quỹ</title><style>body{font-family:'Inter',sans-serif;margin:25px;color:#212121}h1{text-align:center;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin-top:20px;font-size:14px}th,td{border:1px solid #ccc;padding:10px;text-align:left}th{background-color:#f2f2f2}.summary{margin-top:20px;font-size:16px}.summary p{margin:8px 0}.summary .total{font-weight:bold}.details-table td:nth-child(2),.details-table td:nth-child(3){text-align:right}.footer{margin-top:50px;text-align:center}</style></head><body><h1>BIÊN BẢN KIỂM QUỸ</h1><div class="summary"><p><strong>Thời gian:</strong> ${(lastResetTime||new Date).toLocaleString('vi-VN')}</p><hr style="border:0;border-top:1px solid #ccc;margin:15px 0"><p>Tổng dư quỹ cần kiểm: ${formatCurrency(targetFund)}</p><p>Tiền lẻ (không đếm): ${formatCurrency(smallChange)}</p><p class="total">Quỹ cần cân đối: ${formatCurrency(adjustedTargetFund)}</p><p class="total">Tổng tiền mặt đếm được: ${formatCurrency(totalCash)}</p><p class="total">Chênh lệch (${getDifferenceLabel().replace('Chênh Lệch ','')}): ${formatCurrency(difference)}</p></div><h2>Chi Tiết Mệnh Giá</h2><table class="details-table"><thead><tr><th>Mệnh Giá</th><th>Số Lượng</th><th>Thành Tiền</th></tr></thead><tbody>${denominations.map(d=>`<tr><td>${new Intl.NumberFormat('vi-VN').format(d.value)} ₫</td><td>${counts[d.value]||0}</td><td>${subtotals[d.value]?new Intl.NumberFormat('vi-VN').format(subtotals[d.value]):'0'} ₫</td></tr>`).join('')}</tbody></table><div class="footer"><p>_________________________</p><p>Chữ ký người kiểm quỹ</p></div></body></html>`;
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+        printWindow.document.open();
+        printWindow.document.write(printContent);
+        printWindow.document.close();
+        printWindow.focus();
+        printWindow.print();
+    }
+  };
+  
+  const handleExportExcel = () => {
+    if (savedFundChecks.length === 0) {
+        alert("Không có dữ liệu lịch sử để xuất.");
+        return;
+    }
+    const dataToExport = savedFundChecks.map(check => ({
+        'Thời gian kiểm': check.checkTime.toLocaleString('vi-VN'),
+        'Quỹ cần kiểm': check.targetFund,
+        'Tiền lẻ': check.smallChange,
+        'Quỹ cân đối': check.adjustedTargetFund,
+        'Tổng tiền mặt': check.totalCash,
+        'Chênh lệch': check.difference,
+        ...denominations.reduce((acc, d) => ({
+            ...acc,
+            [`SL tờ ${formatNumber(d.value)}`]: check.counts[d.value] || 0
+        }), {})
+    }));
+    const worksheet = window.XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, worksheet, "LichSuKiemQuy");
+    const colWidths = Object.keys(dataToExport[0]).map(key => ({ wch: Math.max(key.length, 20) }));
+    worksheet["!cols"] = colWidths;
+    window.XLSX.writeFile(workbook, `LichSuKiemQuy_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+  
+  const loadHistoryItem = (checkId: number) => {
+    const itemToLoad = savedFundChecks.find(item => item.id === checkId);
+    if (itemToLoad) {
+        setCounts(itemToLoad.counts);
+        setTargetFund(itemToLoad.targetFund);
+        setSmallChange(itemToLoad.smallChange);
+        setLastResetTime(itemToLoad.checkTime);
+        setShowHistory(false);
+        alert('Đã tải lại dữ liệu từ lịch sử.');
+    }
+  };
+
+
+  // --- Kiem Ke & Kiem Tra Ton Kho Logic ---
+  const handleFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = window.XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const json = window.XLSX.utils.sheet_to_json(worksheet, { raw: false });
+        
+        const loadedItems: InventoryItem[] = json.map((row: any) => {
+            const imei = findValue(row, ['IMEI_1']);
+            const productCode = findValue(row, ['Mã sản phẩm']);
+            const productName = findValue(row, ['Tên sản phẩm']);
+            const quantity = findValue(row, ['Số lượng']);
+            const status = findValue(row, ['trạng thái sản phẩm']);
+            const category = findValue(row, ['Ngành hàng']);
+            const priceString = String(findValue(row, ['Giá bán', 'Giá']) || '0');
+
+            let rawQrCodeValue = String(imei || productCode || '').trim();
+            if (rawQrCodeValue.startsWith("'")) {
+              rawQrCodeValue = rawQrCodeValue.substring(1);
+            }
+
+            let rawProductCodeValue = String(productCode || '').trim();
+            if (rawProductCodeValue.startsWith("'")) {
+              rawProductCodeValue = rawProductCodeValue.substring(1);
+            }
+          
+            return {
+                qrCode: rawQrCodeValue,
+                productCodeForSearch: rawProductCodeValue,
+                productName: String(productName || 'N/A'),
+                quantity: Number(String(quantity || 0).replace(/,/g, '')), // Handle formatted numbers
+                price: parseFormattedNumber(priceString),
+                checked: false,
+                hasImei: !!imei,
+                status: String(status || 'N/A'),
+                category: String(category || 'N/A'),
+            };
+        });
+
+        const uniqueStatuses = [...new Set(loadedItems.map(item => item.status).filter(Boolean).filter(s => s !== 'N/A'))];
+        const uniqueCategories = [...new Set(loadedItems.map(item => item.category).filter(Boolean).filter(c => c !== 'N/A'))];
+
+        setAvailableStatuses(uniqueStatuses);
+        setAvailableCategories(uniqueCategories);
+        setInventoryItems(loadedItems);
+        
+        setImeiFilter('all');
+        setStatusFilter('all');
+        setCategoryFilter('all');
+        setSearchHistory([]);
+        setSearchQuery('');
+        setTimeout(() => searchInputRef.current?.focus(), 100);
+
+      } catch (error) {
+        console.error("Error reading or parsing Excel file:", error);
+        alert("Lỗi đọc file Excel. Hãy đảm bảo file có các cột bắt buộc: 'Tên sản phẩm', 'Số lượng'. Và các cột tùy chọn: 'IMEI_1', 'Mã sản phẩm', 'trạng thái sản phẩm', 'Ngành hàng', 'Giá bán'.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    event.target.value = ''; // Reset file input
+  };
+  
+  const handleInventoryReset = () => {
+    setInventoryItems([]);
+    setFileName('');
+    setImeiFilter('all');
+    setStatusFilter('all');
+    setCategoryFilter('all');
+    setAvailableStatuses([]);
+    setAvailableCategories([]);
+    setSearchHistory([]);
+    setSearchQuery('');
+  };
+
+  const handleCheckItem = (originalIndex: number) => {
+    const newItems = inventoryItems.map((item, i) =>
+        i === originalIndex ? { ...item, checked: !item.checked } : item
+    );
+    setInventoryItems(newItems);
+  
+    const futureFilteredItems = newItems
+        .map((item, idx) => ({ ...item, originalIndex: idx }))
+        .filter(item => {
+            if (imeiFilter === 'all') return true;
+            if (imeiFilter === 'with_imei') return item.hasImei;
+            if (imeiFilter === 'without_imei') return !item.hasImei;
+            return true;
+        })
+        .filter(item => {
+            if (statusFilter === 'all') return true;
+            return item.status === statusFilter;
+        })
+        .filter(item => {
+            if (categoryFilter === 'all') return true;
+            return item.category === categoryFilter;
+        });
+  
+    const currentItemInFilteredList = futureFilteredItems.find(item => item.originalIndex === originalIndex);
+    if (!currentItemInFilteredList) return;
+    const currentFilteredIndex = futureFilteredItems.indexOf(currentItemInFilteredList);
+  
+    let nextUncheckedFilteredIndex = -1;
+    for (let i = currentFilteredIndex + 1; i < futureFilteredItems.length; i++) {
+        if (!futureFilteredItems[i].checked) {
+            nextUncheckedFilteredIndex = i;
+            break;
+        }
+    }
+    if (nextUncheckedFilteredIndex === -1) {
+        for (let i = 0; i < currentFilteredIndex; i++) {
+            if (!futureFilteredItems[i].checked) {
+                nextUncheckedFilteredIndex = i;
+                break;
+            }
+        }
+    }
+  
+    if (nextUncheckedFilteredIndex !== -1) {
+        const nextItemToScrollTo = futureFilteredItems[nextUncheckedFilteredIndex];
+        setTimeout(() => {
+            const nextElement = document.getElementById(`inventory-item-${nextItemToScrollTo.originalIndex}`);
+            if (nextElement) {
+                nextElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 100);
+    }
+  };
+
+  const handleExportUncheckedItems = () => {
+    const uncheckedItems = inventoryItems.filter(item => !item.checked);
+
+    if (uncheckedItems.length === 0) {
+        alert("Tất cả sản phẩm đã được kiểm tra. Không có gì để xuất.");
+        return;
+    }
+
+    let totalValue = 0;
+
+    const dataToExport = uncheckedItems.map(item => {
+        const itemValue = item.quantity * item.price;
+        totalValue += itemValue;
+        return {
+            'Tên sản phẩm': item.productName,
+            'Mã sản phẩm': item.productCodeForSearch,
+            'Mã QR (IMEI)': item.qrCode,
+            'Số lượng': item.quantity,
+            'Giá bán': item.price,
+            'Thành tiền': itemValue,
+            'Ngành hàng': item.category,
+            'Trạng thái': item.status
+        };
+    });
+    
+    const summaryRow = {
+        'Tên sản phẩm': 'TỔNG CỘNG',
+        'Thành tiền': totalValue
+    };
+
+    const worksheet = window.XLSX.utils.json_to_sheet(dataToExport);
+
+    window.XLSX.utils.sheet_add_json(worksheet, [summaryRow], {
+      header: Object.keys(dataToExport[0]),
+      skipHeader: true,
+      origin: -1 
+    });
+
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, worksheet, "SP_Chua_Kiem_Tra");
+
+    const colWidths = [
+      { wch: 50 }, { wch: 20 }, { wch: 20 },
+      { wch: 10 }, { wch: 15 }, { wch: 15 },
+      { wch: 20 }, { wch: 20 },
+    ];
+    worksheet["!cols"] = colWidths;
+
+    window.XLSX.writeFile(workbook, `SP_ChuaKiem_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const filteredInventoryItems = useMemo(() => {
+    return inventoryItems
+        .map((item, index) => ({ ...item, originalIndex: index }))
+        .filter(item => {
+            if (imeiFilter === 'all') return true;
+            if (imeiFilter === 'with_imei') return item.hasImei;
+            if (imeiFilter === 'without_imei') return !item.hasImei;
+            return true;
+        })
+        .filter(item => {
+            if (statusFilter === 'all') return true;
+            return item.status === statusFilter;
+        })
+        .filter(item => {
+            if (categoryFilter === 'all') return true;
+            return item.category === categoryFilter;
+        });
+  }, [inventoryItems, imeiFilter, statusFilter, categoryFilter]);
+
+  const handleSearchSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+
+    const query = searchQuery.trim().toLowerCase();
+    
+    let foundItem = inventoryItems.find(item => 
+        (item.qrCode && String(item.qrCode).trim().toLowerCase() === query) ||
+        (item.productCodeForSearch && String(item.productCodeForSearch).trim().toLowerCase() === query)
+    );
+
+    if (!foundItem) {
+        const nameMatches = inventoryItems.filter(item =>
+            item.productName.toLowerCase().includes(query)
+        );
+        if (nameMatches.length > 0) {
+            foundItem = nameMatches[0];
+        }
+    }
+
+    setSearchHistory(prev => [{ query: searchQuery.trim(), result: foundItem || null }, ...prev]);
+    setSearchQuery('');
+    setIsSuggestionsVisible(false);
+  };
+  
+  const handleSuggestionClick = (item: InventoryItem) => {
+    setSearchHistory(prev => [{ query: item.productName, result: item }, ...prev]);
+    setSearchQuery('');
+    setIsSuggestionsVisible(false);
+    setTimeout(() => searchInputRef.current?.focus(), 100);
+  };
+
+  // --- Kiem Hang Chuyen Kho Logic ---
+  const handleFileImportForExcelCheck = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setExcelCheckFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const data = new Uint8Array(e.target?.result as ArrayBuffer);
+            const workbook = window.XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const json = window.XLSX.utils.sheet_to_json(worksheet, { raw: false });
+
+            const loadedItems: ExcelCheckItem[] = json.map((row: any) => {
+                let productCode = String(findValue(row, ['Mã sản phẩm']) || 'N/A').trim();
+                if (productCode.startsWith("'")) {
+                    productCode = productCode.substring(1);
+                }
+                const productName = findValue(row, ['Tên sản phẩm']);
+                const quantity = findValue(row, ['Số lượng']);
+                let imei = findValue(row, ['IMEI_1']);
+                if (imei) {
+                    imei = String(imei).trim();
+                    if (imei.startsWith("'")) {
+                        imei = imei.substring(1);
+                    }
+                }
+                const category = findValue(row, ['Ngành hàng']);
+              
+                return {
+                    productCode: productCode,
+                    productName: String(productName || 'N/A'),
+                    fileQuantity: Number(String(quantity || 0).replace(/,/g, '')),
+                    actualQuantity: null,
+                    imei: imei ? imei : undefined,
+                    category: String(category || 'N/A'),
+                };
+            });
+            setExcelCheckItems(loadedItems);
+            setScanStatus({ type: 'idle', message: 'Sẵn sàng quét...' });
+            setTimeout(() => scanInputRef.current?.focus(), 100);
+        } catch (error) {
+            console.error("Error reading or parsing Excel file:", error);
+            alert("Lỗi đọc file Excel. Hãy đảm bảo file có các cột bắt buộc: 'Tên sản phẩm', 'Số lượng'. Và các cột tùy chọn: 'Mã sản phẩm', 'IMEI_1', 'Ngành hàng'.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+    event.target.value = '';
+  };
+  
+  const handleScanSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const query = scanQuery.trim();
+    if (!query) return;
+
+    // Sanitize query from Excel (which might have "'" prefix)
+    const sanitizedQuery = (query.startsWith("'") ? query.substring(1) : query).toLowerCase();
+
+    let foundIndex = -1;
+    
+    // Sanitize item data on-the-fly for comparison
+    const cleanString = (str: string | undefined) => {
+        if (!str) return '';
+        let cleaned = String(str).trim();
+        if (cleaned.startsWith("'")) {
+            cleaned = cleaned.substring(1);
+        }
+        return cleaned.toLowerCase();
+    };
+
+    // Prioritize search by product code first
+    foundIndex = excelCheckItems.findIndex(item => cleanString(item.productCode) === sanitizedQuery);
+
+    // If not found, search by IMEI
+    if (foundIndex === -1) {
+        foundIndex = excelCheckItems.findIndex(item => cleanString(item.imei) === sanitizedQuery);
+    }
+    
+    if (foundIndex !== -1) {
+        const newItems = [...excelCheckItems];
+        const itemToUpdate = newItems[foundIndex];
+        itemToUpdate.actualQuantity = (itemToUpdate.actualQuantity || 0) + 1;
+        setExcelCheckItems(newItems);
+        setScanStatus({type: 'success', message: `Đã cập nhật: ${itemToUpdate.productName}`});
+        setLastScannedIndex(foundIndex);
+        setTimeout(() => setLastScannedIndex(null), 1000); // Highlight for 1 second
+
+    } else {
+        setScanStatus({type: 'error', message: `Không tìm thấy sản phẩm với mã: ${query}`});
+    }
+
+    setScanQuery(''); // Clear input for next scan
+};
+
+
+  const handleExcelCheckReset = () => {
+    setExcelCheckItems([]);
+    setExcelCheckFileName('');
+    setScanQuery('');
+    setScanStatus({ type: 'idle', message: 'Sẵn sàng quét...' });
+  };
+
+  const handleActualQuantityChange = (index: number, value: string) => {
+      const newItems = [...excelCheckItems];
+      const numberValue = parseInt(value, 10);
+      newItems[index].actualQuantity = isNaN(numberValue) || numberValue < 0 ? null : numberValue;
+      setExcelCheckItems(newItems);
+  };
+
+  const excelCheckStats = useMemo(() => {
+    return excelCheckItems.reduce((acc, item) => {
+        acc.totalFileQuantity += item.fileQuantity;
+        if (item.actualQuantity !== null) {
+            acc.totalActualQuantity += item.actualQuantity;
+            const difference = item.actualQuantity - item.fileQuantity;
+            if (difference === 0) {
+                acc.matchedCount++;
+            } else {
+                acc.mismatchedCount++;
+            }
+        }
+        return acc;
+    }, { totalFileQuantity: 0, totalActualQuantity: 0, matchedCount: 0, mismatchedCount: 0 });
+  }, [excelCheckItems]);
+  
+  const mismatchedItems = useMemo(() => {
+    return excelCheckItems.filter(item => item.actualQuantity !== null && item.actualQuantity !== item.fileQuantity);
+  }, [excelCheckItems]);
+
+  const handleExportExcelCheckResult = () => {
+    if (excelCheckItems.length === 0) {
+        alert("Không có dữ liệu để xuất.");
+        return;
+    }
+
+    const dataToExport = excelCheckItems.map(item => {
+        const difference = item.actualQuantity === null ? '' : item.actualQuantity - item.fileQuantity;
+        let status = 'Chưa kiểm';
+        if (item.actualQuantity !== null) {
+            if (difference === 0) status = 'Khớp';
+            else if (Number(difference) > 0) status = `Thừa ${difference}`;
+            else status = `Thiếu ${Math.abs(Number(difference))}`;
+        }
+        return {
+            'Mã sản phẩm': item.productCode,
+            'Tên sản phẩm': item.productName,
+            'IMEI': item.imei || '',
+            'Số lượng (File)': item.fileQuantity,
+            'Số lượng (Thực tế)': item.actualQuantity ?? '',
+            'Chênh lệch': difference,
+            'Trạng thái': status,
+        };
+    });
+
+    const worksheet = window.XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, worksheet, "KetQuaKiemHang");
+    
+    worksheet["!cols"] = [{ wch: 20 }, { wch: 50 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
+    
+    window.XLSX.writeFile(workbook, `KetQuaKiemHang_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const handleExcelCheckKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, currentIndex: number) => {
+    if (event.key === 'Enter' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        const nextIndex = currentIndex + 1;
+        if (nextIndex < excelCheckItems.length) {
+            const nextInput = document.getElementById(`excel-check-item-${nextIndex}`);
+            nextInput?.focus();
+        }
+    } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        const prevIndex = currentIndex - 1;
+        if (prevIndex >= 0) {
+            const prevInput = document.getElementById(`excel-check-item-${prevIndex}`);
+            prevInput?.focus();
+        }
+    }
+  };
+
+  // --- Thay POSM Logic ---
+  const handlePosmFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setPosmFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = window.XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        const rows: any[][] = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+
+        if (rows.length < 1) {
+             alert("File Excel trống hoặc không có dữ liệu.");
+             return;
+        }
+
+        let productNameIndex = -1;
+        let productCodeIndex = -1;
+        let oldPriceIndex = -1;
+        let newPriceIndex = -1;
+        let promotionIndex = -1;
+        let headerRowIndex = -1;
+        let dataStartIndex = 0;
+
+        // Phase 1: Try to find "Tên sản phẩm" header with a strict match
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+            const foundIndex = rows[i].findIndex(cell => String(cell).toLowerCase().trim() === 'tên sản phẩm');
+            if (foundIndex !== -1) {
+                headerRowIndex = i;
+                productNameIndex = foundIndex;
+                break;
+            }
+        }
+
+        // Phase 2: Determine column indices and data start row
+        if (headerRowIndex !== -1) {
+            const header = rows[headerRowIndex].map(c => String(c).toLowerCase().trim());
+            
+            productCodeIndex = header.findIndex(h => h.includes('mã sản phẩm'));
+            if (productCodeIndex === -1) {
+                productCodeIndex = productNameIndex + 1;
+            }
+
+            oldPriceIndex = header.findIndex(h => h.includes('giá gốc') || h.includes('giá cũ'));
+            if (oldPriceIndex === -1) {
+                oldPriceIndex = 15; // Fallback to Column P
+            }
+
+            newPriceIndex = header.findIndex(h => h.includes('giá mới') || h.includes('giá sau giảm'));
+            if (newPriceIndex === -1) {
+                newPriceIndex = 16; // Fallback to Column Q
+            }
+            
+            promotionIndex = header.findIndex(h => h.includes('khuyến mãi'));
+            if (promotionIndex === -1) {
+                promotionIndex = 29; // Fallback to Column AD
+            }
+            dataStartIndex = headerRowIndex + 1;
+        } else {
+            productNameIndex = 25; // Z
+            productCodeIndex = 26; // AA
+            oldPriceIndex = 15;   // P
+            newPriceIndex = 16;   // Q
+            promotionIndex = 29; // AD
+            dataStartIndex = 0; // Assume no header, start from first row
+        }
+
+        // Phase 3: Parse data
+        const loadedItems: PosmChangeItem[] = [];
+        for (let i = dataStartIndex; i < rows.length; i++) {
+            const row = rows[i];
+            
+            if (row.length === 0 || row.length <= productNameIndex || !row[productNameIndex]) {
+                continue;
+            }
+
+            const productName = String(row[productNameIndex]).trim();
+            if (productName === '') continue;
+
+            const productCode = row.length > productCodeIndex ? String(row[productCodeIndex] || `POSM-${i}`).trim() : `POSM-${i}`;
+            const oldPriceString = row.length > oldPriceIndex ? String(row[oldPriceIndex] || '0') : '0';
+            const newPriceString = row.length > newPriceIndex ? String(row[newPriceIndex] || '0') : '0';
+            const promotionText = row.length > promotionIndex ? String(row[promotionIndex] || '').trim() : '';
+
+            // Extract bonus point from product code
+            let bonusPoint = undefined;
+            const codeParts = productCode.split('-');
+            if (codeParts.length > 1) {
+                const bonusPart = codeParts[1];
+                if (bonusPart && bonusPart.length >= 5) {
+                    const potentialBonus = bonusPart.substring(4);
+                    const match = potentialBonus.match(/\d{2,3}/);
+                    if (match) {
+                        bonusPoint = match[0];
+                    }
+                }
+            }
+            
+            loadedItems.push({
+                productName,
+                productCode,
+                oldPrice: parseFormattedNumber(oldPriceString),
+                newPrice: parseFormattedNumber(newPriceString),
+                promotion: promotionText,
+                bonusPoint: bonusPoint,
+            });
+        }
+        
+        if (loadedItems.length === 0) {
+            alert("Không đọc được dữ liệu sản phẩm. Vui lòng kiểm tra lại định dạng file và vị trí cột.");
+            setPosmItems([]);
+        } else {
+            setPosmItems(loadedItems);
+        }
+        setSelectedPosmItems([]);
+
+      } catch (error) {
+        console.error("Error reading or parsing Excel file for POSM:", error);
+        alert("Đã xảy ra lỗi khi xử lý file Excel. Vui lòng đảm bảo file không bị lỗi và đúng định dạng.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    event.target.value = '';
+  };
+    
+  const handlePosmReset = () => {
+    setPosmItems([]);
+    setPosmFileName('');
+    setSelectedPosmItems([]);
+  };
+
+  const handlePosmSelect = (productCode: string) => {
+    setSelectedPosmItems(prev =>
+        prev.includes(productCode)
+            ? prev.filter(code => code !== productCode)
+            : [...prev, productCode]
+    );
+  };
+
+  const handlePosmSelectAll = (event: React.ChangeEvent<HTMLInputElement>) => {
+      if (event.target.checked) {
+          setSelectedPosmItems(posmItems.map(item => item.productCode));
+      } else {
+          setSelectedPosmItems([]);
+      }
+  };
+
+  const handlePrintPosm = async (format: 'a5-2' | 'a6-2') => {
+    const itemsToPrint = posmItems.filter(item => selectedPosmItems.includes(item.productCode));
+    if (itemsToPrint.length === 0) {
+        alert("Vui lòng chọn ít nhất một sản phẩm để in.");
+        return;
+    }
+
+    const qrCodePromises = itemsToPrint.map(item => 
+        window.QRCode.toDataURL(item.productCode.split('-')[0], { width: 120, margin: 1, errorCorrectionLevel: 'medium' })
+    );
+    const qrCodeDataUrls = await Promise.all(qrCodePromises);
+    const itemsWithQr = itemsToPrint.map((item, index) => ({...item, qrDataUrl: qrCodeDataUrls[index] }));
+
+    let formatSpecificStyles = '';
+    let pageClasses = 'page';
+    let cardClasses = 'posm-card';
+
+    if (format === 'a5-2') {
+         formatSpecificStyles = `
+            @page { 
+                size: A4 portrait;
+                margin: 0; 
+            }
+            .page { 
+                width: 210mm; 
+                height: 297mm;
+                justify-content: flex-start;
+            }
+            .posm-card {
+                width: 210mm;
+                height: 148mm;
+                border-bottom: 1px solid #eee;
+            }
+            .page .posm-card:last-child {
+                border-bottom: none;
+            }
+         `;
+    } else { // 'a6-2'
+         pageClasses += ' a5-page';
+         cardClasses += ' a6';
+         formatSpecificStyles = `
+            @page { 
+                size: A5 portrait;
+                margin: 0; 
+            }
+            .page.a5-page { 
+                width: 148.5mm; 
+                height: 210mm;
+                justify-content: flex-start;
+            }
+            .posm-card.a6 {
+                width: 148.5mm;
+                height: 105mm;
+                padding: 4mm;
+            }
+            .page.a5-page .posm-card.a6:first-of-type:not(:last-of-type) {
+                border-bottom: 1px dashed #ccc;
+            }
+            .posm-card.a6 .header-main-info {
+                 min-height: 48px;
+                 padding-right: 5px;
+            }
+            .posm-card.a6 .product-name {
+                font-size: 0.95em;
+                line-height: 1.2;
+                -webkit-line-clamp: 3;
+            }
+            .posm-card.a6 .promotion-text {
+                font-size: 1.05em;
+                margin-top: 3px;
+                line-height: 1.2;
+                -webkit-line-clamp: 2;
+            }
+            .posm-card.a6 .promotion-block {
+                font-size: 1.4em;
+                -webkit-line-clamp: 3;
+                margin-bottom: 0.25em;
+                padding: 0 5px;
+            }
+             .posm-card.a6 .promotion-block.promotion-only {
+                font-size: 2.5em;
+                -webkit-line-clamp: 5;
+            }
+            .posm-card.a6 .price-block.primary .price-label {
+                font-size: 1.8em;
+            }
+            .posm-card.a6 .price-block.primary .price-value {
+                font-size: 4.4em;
+            }
+            .posm-card.a6 .price-block.secondary .price-label {
+                font-size: 1.5em;
+            }
+            .posm-card.a6 .price-block.secondary .price-value {
+                font-size: 3.8em;
+            }
+            .posm-card.a6 .posm-body {
+                padding: 1px 0;
+            }
+            .posm-card.a6 .qr-code-container img {
+                width: 42px;
+                height: 42px;
+            }
+            .posm-card.a6 .product-code {
+                font-size: 1.05em;
+            }
+         `;
+    }
+
+    const cssStyles = `
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+            body { 
+                margin: 0; 
+                font-family: 'Inter', sans-serif;
+                background-color: #fff;
+            }
+            .page { 
+                page-break-after: always;
+                box-sizing: border-box; 
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                overflow: hidden;
+            }
+            
+            ${formatSpecificStyles}
+
+            .posm-card {
+                box-sizing: border-box;
+                padding: 5mm;
+                background: #fff;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                position: relative;
+                flex-shrink: 0;
+            }
+            
+            .separator {
+                border: none;
+                border-top: 2px solid #111;
+                margin: 0;
+                flex-shrink: 0;
+            }
+
+            .posm-header {
+                padding: 10px 15px;
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                flex-shrink: 0;
+            }
+            .header-main-info {
+                flex-grow: 1;
+                padding-right: 10px;
+                min-height: 80px;
+            }
+            .product-name-container {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .category-icon {
+                width: 1.2em;
+                height: 1.2em;
+                flex-shrink: 0;
+                color: #333;
+            }
+            .product-name {
+                 font-size: 1.6em;
+                 font-weight: 800;
+                 color: #000;
+                 line-height: 1.2;
+                 word-break: break-word;
+                 display: -webkit-box;
+                 -webkit-line-clamp: 3;
+                 -webkit-box-orient: vertical;
+                 overflow: hidden;
+                 text-overflow: ellipsis;
+            }
+            .promotion-text {
+                font-size: 1.4em;
+                font-weight: 500;
+                color: #4b5563;
+                margin-top: 6px;
+                line-height: 1.2;
+                word-break: break-word;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .promotion-text > span {
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .gift-icon {
+                width: 1.1em;
+                height: 1.1em;
+                flex-shrink: 0;
+                color: #4b5563;
+            }
+            .posm-body {
+                flex-grow: 1;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                padding: 5px 0;
+                text-align: center;
+                overflow: hidden;
+            }
+            .promotion-block {
+                font-size: 1.8em;
+                font-weight: 800;
+                color: #111;
+                padding: 0 10px;
+                text-align: center;
+                line-height: 1.25;
+                word-break: break-word;
+                margin-bottom: 0.5em;
+                display: -webkit-box;
+                -webkit-line-clamp: 4;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .promotion-block.promotion-only {
+                font-size: 3.4em;
+                margin-bottom: 0;
+                -webkit-line-clamp: 5;
+                flex-grow: 1;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 15px;
+            }
+            .promotion-block.promotion-only .gift-icon {
+                width: 1em;
+                height: 1em;
+            }
+            .price-block {
+                margin-bottom: 0.5em;
+            }
+            .price-block:last-child {
+                margin-bottom: 0;
+            }
+            .price-label {
+                font-weight: 800;
+                color: #111;
+                display: block;
+                line-height: 1;
+            }
+             .price-value {
+                font-weight: 800;
+                color: #111;
+                line-height: 1;
+                white-space: nowrap;
+            }
+            
+            .price-block.primary .price-label { font-size: 2.8em; }
+            .price-block.primary .price-value { font-size: 6.5em; }
+
+            .price-block.secondary .price-label { font-size: 2em; }
+            .price-block.secondary .price-value { font-size: 5em; }
+
+            .posm-footer {
+                padding: 8px 15px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background-color: #f8f9fa;
+                flex-shrink: 0;
+            }
+            .footer-info { font-size: 0.8em; color: #555; }
+            .product-code { 
+                font-weight: 800;
+                font-size: 1.2em;
+            }
+            .print-date { }
+            .qr-code-container img { width: 50px; height: 50px; display: block; }
+
+            @media print {
+                body {
+                    -webkit-print-color-adjust: exact; 
+                    print-color-adjust: exact;
+                }
+            }
+        </style>
+    `;
+
+    const itemsPerPage = 2;
+
+    let content = '';
+    for (let i = 0; i < itemsWithQr.length; i += itemsPerPage) {
+        const pageItems = itemsWithQr.slice(i, i + itemsPerPage);
+        
+        content += `<div class="${pageClasses}">`;
+        pageItems.forEach(item => {
+            const priceDifference = item.oldPrice - item.newPrice;
+            const parsedProductName = parseProductNameForPosm(item.productName);
+            const productNameWithBonus = parsedProductName + (item.bonusPoint ? ` (${item.bonusPoint})` : '');
+            
+            const category = getCategoryFromProductName(item.productName);
+            const categoryIconSvg = getIconSvg(category, 'category-icon');
+            const giftIconSvg = getIconSvg('gift', 'gift-icon');
+
+            let promotionTextOnly = '';
+            if (item.promotion) {
+                const originalPromotion = item.promotion;
+                const separatorIndex = originalPromotion.toLowerCase().indexOf("hoặc");
+                if (separatorIndex !== -1) {
+                    promotionTextOnly = originalPromotion.substring(0, separatorIndex).trim();
+                } else {
+                    promotionTextOnly = originalPromotion;
+                }
+                promotionTextOnly = promotionTextOnly.replace(/^-/, '').trim();
+            }
+            
+            const showPromotionInHeader = priceDifference > 0 && !!promotionTextOnly;
+            const showPromotionInBody = priceDifference <= 0 && !!promotionTextOnly;
+
+
+            content += `
+                <div class="${cardClasses}">
+                    <div class="posm-header">
+                        <div class="header-main-info">
+                            <div class="product-name-container">
+                                ${categoryIconSvg}
+                                <div class="product-name">${productNameWithBonus}</div>
+                            </div>
+                            ${showPromotionInHeader ? `<div class="promotion-text">${giftIconSvg}<span>Khuyến mãi: ${promotionTextOnly}</span></div>` : ''}
+                        </div>
+                    </div>
+                    <hr class="separator" />
+                    <div class="posm-body">
+                        ${priceDifference > 0 ? `
+                            <div class="price-block primary">
+                                <span class="price-label">GIẢM</span>
+                                <span class="price-value">${formatCurrency(priceDifference)}</span>
+                            </div>
+                            <div class="price-block secondary">
+                                <span class="price-label">CHỈ CÒN</span>
+                                <span class="price-value">${formatCurrency(item.newPrice)}</span>
+                            </div>
+                        ` : (showPromotionInBody ? `
+                            <div class="promotion-block promotion-only">
+                               ${giftIconSvg}
+                               <span>${promotionTextOnly}</span>
+                            </div>
+                        ` : `
+                            <div class="price-block secondary">
+                                <span class="price-label">GIÁ BÁN</span>
+                                <span class="price-value">${formatCurrency(item.newPrice)}</span>
+                            </div>
+                        `)}
+                    </div>
+                    <hr class="separator" />
+                    <div class="posm-footer">
+                        <div class="footer-info">
+                            <div class="product-code">Mã SP: ${item.productCode.split('-')[0]}</div>
+                            <div class="print-date">In ngày: ${new Date().toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                        </div>
+                        <div class="qr-code-container">
+                            <img src="${item.qrDataUrl}" alt="QR Code" />
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        content += '</div>';
+    }
+
+    const fullHtml = `<html><head><title>In POSM</title>${cssStyles}</head><body>${content}</body></html>`;
+    
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+        printWindow.document.open();
+        printWindow.document.write(fullHtml);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => {
+            printWindow.print();
+        }, 500);
+    }
+  };
+
+
+  // --- Navigation & Rendering ---
+  const navItemClasses = (page: Page) => 
+    `flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-white ${
+        currentPage === page ? 'bg-indigo-100 text-indigo-700' : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+    }`;
+    
+  const renderContent = () => {
+    switch (currentPage) {
+      case 'trang-chu':
+        return (
+          <div className="w-full max-w-7xl mx-auto text-center">
+             <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-wide">TRANG HỖ TRỢ CÔNG VIỆC</h1>
+             <div className="mt-12 flex flex-row flex-nowrap items-stretch justify-center gap-6 text-center">
+                
+                <div onClick={() => setCurrentPage('kiem-quy')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-indigo-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                    <div className="flex-shrink-0 bg-blue-100 text-blue-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-blue-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                    </div>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors duration-300">Kiểm Quỹ Thu Ngân</h2>
+                </div>
+
+                <div onClick={() => setCurrentPage('kiem-ke')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-indigo-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                    <div className="flex-shrink-0 bg-green-100 text-green-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-green-200">
+                       <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                    </div>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors duration-300">Kiểm Kê Hàng Hóa</h2>
+                </div>
+                
+                 <div onClick={() => setCurrentPage('kiem-tra-ton-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-indigo-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                    <div className="flex-shrink-0 bg-purple-100 text-purple-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-purple-200">
+                       <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                    </div>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors duration-300">Kiểm Tra Tồn Kho</h2>
+                </div>
+
+                <div onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-indigo-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                    <div className="flex-shrink-0 bg-orange-100 text-orange-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-orange-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </div>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors duration-300">Kiểm Hàng Chuyển Kho</h2>
+                </div>
+                
+                <div onClick={() => setCurrentPage('thay-posm')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-indigo-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                    <div className="flex-shrink-0 bg-teal-100 text-teal-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-teal-200">
+                       <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                           <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                    </div>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors duration-300">Thay POSM</h2>
+                </div>
+             </div>
+          </div>
+        );
+      case 'kiem-quy':
+        return (
+          <>
+            {showHistory && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowHistory(false)}>
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                        <header className="p-5 border-b border-slate-200 flex justify-between items-center flex-shrink-0">
+                            <h2 className="text-xl font-bold text-slate-800">Lịch Sử Kiểm Quỹ</h2>
+                            <button onClick={() => setShowHistory(false)} className="text-slate-500 hover:text-slate-800 transition-colors rounded-full p-1 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </header>
+                        <main className="p-6 overflow-y-auto">
+                            {savedFundChecks.length > 0 ? (
+                                <div className="space-y-4">
+                                    {savedFundChecks.map(item => {
+                                        const diffColor = item.difference === 0 ? 'text-green-600' : item.difference > 0 ? 'text-amber-600' : 'text-red-600';
+                                        return (
+                                        <div key={item.id} className="bg-slate-50 border border-slate-200/80 rounded-lg p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                            <div>
+                                                <p className="font-semibold text-slate-800">Thời gian: <span className="font-normal text-slate-600">{item.checkTime.toLocaleString('vi-VN')}</span></p>
+                                                <p className="font-semibold text-slate-800">Tổng tiền mặt: <span className="font-mono text-indigo-600 font-bold">{formatCurrency(item.totalCash)}</span></p>
+                                                <p className={`font-semibold ${diffColor}`}>Chênh lệch: <span className="font-mono font-bold">{formatCurrency(item.difference)}</span></p>
+                                            </div>
+                                            <button onClick={() => loadHistoryItem(item.id)} className="flex-shrink-0 flex items-center justify-center gap-2 px-3 py-1.5 bg-white text-slate-700 border border-slate-300 font-semibold rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-400 focus:ring-offset-white transition-colors duration-200 text-xs">
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7V9a1 1 0 01-2 0V3a1 1 0 011-1zm12 14a1 1 0 01-1 1v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 111.885-.666A5.002 5.002 0 0014.001 13v-2a1 1 0 012 0v5a1 1 0 01-1 1z" clipRule="evenodd" /></svg>
+                                                Tải Lại
+                                            </button>
+                                        </div>
+                                    )})}
+                                </div>
+                            ) : (
+                                <div className="text-center py-10">
+                                    <p className="text-slate-500">Chưa có lịch sử nào được lưu.</p>
+                                </div>
+                            )}
+                        </main>
+                    </div>
+                </div>
+            )}
+            <div className="w-full max-w-7xl">
+              <header className="text-center mb-8">
+                  <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">KIỂM QUỸ THU NGÂN</h1>
+                  <div className="mt-4 flex flex-wrap justify-center items-center gap-3">
+                    <button id="save-button" onClick={handleSave} className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-white transition-colors duration-200 text-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Lưu Kết Quả
+                    </button>
+                    <button onClick={handlePrint} className="flex items-center justify-center gap-2 px-4 py-2 bg-white text-slate-700 border border-slate-300 font-semibold rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-400 focus:ring-offset-white transition-colors duration-200 text-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                        In Biên Bản
+                    </button>
+                    <button onClick={() => setShowHistory(true)} className="flex items-center justify-center gap-2 px-4 py-2 bg-white text-slate-700 border border-slate-300 font-semibold rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-400 focus:ring-offset-white transition-colors duration-200 text-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Xem Lịch Sử
+                    </button>
+                    <button onClick={handleExportExcel} className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 focus:ring-offset-white transition-colors duration-200 text-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                        Tải Excel
+                    </button>
+                    <button id="reset-button" onClick={handleReset} className="flex items-center justify-center gap-2 px-4 py-2 bg-[#3498db] text-white font-semibold rounded-lg hover:bg-[#2980b9] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#3498db] focus:ring-offset-white transition-colors duration-200 text-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.933 13.041a8 8 0 1 1 -9.925 -8.788c3.899 -1 7.935 1.007 9.425 4.747" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M20 4v5h-5" />
+                        </svg>
+                        Làm Mới
+                    </button>
+                  </div>
+              </header>
+              <div className="w-full grid grid-cols-1 lg:grid-cols-5 gap-6">
+                  <div className="lg:col-span-2 flex flex-col gap-6">
+                      <div className="bg-white p-5 rounded-xl shadow-md border border-slate-200/80">
+                          <h2 className="text-xl font-semibold text-slate-800 mb-5">Bảng điều khiển</h2>
+                          <div className="space-y-4">
+                              <div>
+                                  <label htmlFor="target-fund" className="text-sm font-semibold text-slate-600 mb-1 block">Tổng Dư Quỹ Cần Kiểm</label>
+                                  <input id="target-fund" type="text" inputMode="numeric" value={formatNumber(targetFund)} onChange={handleTargetFundChange} placeholder="0" className="w-full bg-white border border-slate-300 rounded-lg py-2 px-3 text-right text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-semibold"/>
+                              </div>
+                              <div>
+                                   <label htmlFor="small-change" className="text-sm font-semibold text-slate-600 mb-1 block">Tiền Lẻ (không đếm)</label>
+                                  <input id="small-change" type="text" inputMode="numeric" value={formatNumber(smallChange)} onChange={handleSmallChange} placeholder="0" className="w-full bg-white border border-slate-300 rounded-lg py-2 px-3 text-right text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-semibold"/>
+                              </div>
+                          </div>
+                      </div>
+                      <div className="space-y-3">
+                          <StatCard title="Quỹ Cần Cân Đối" value={formatCurrency(adjustedTargetFund)} />
+                          <StatCard title="Tổng Tiền Mặt Đếm" value={formatCurrency(totalCash)} className="!bg-indigo-500/10 !border-indigo-200" />
+                           <div className={`p-4 rounded-lg shadow-sm border transition-colors duration-300 ${getDifferenceColor()}`}>
+                              <p className="text-sm font-semibold">{getDifferenceLabel()}</p>
+                              <p className="text-3xl font-bold font-mono tracking-tight">{formatCurrency(difference)}</p>
+                          </div>
+                      </div>
+                  </div>
+                  <div className="lg:col-span-3 flex">
+                      <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200/80 w-full flex flex-col">
+                          <h2 className="text-xl font-semibold text-slate-800 mb-4 flex-shrink-0">Chi Tiết Mệnh Giá</h2>
+                          <div className="grid grid-cols-12 gap-4 px-2 pb-1.5 border-b border-slate-200 flex-shrink-0"><div className="col-span-5 text-left text-sm font-medium text-slate-500">Mệnh Giá</div><div className="col-span-3 text-center text-sm font-medium text-slate-500">Số Lượng</div><div className="col-span-4 text-right text-sm font-medium text-slate-500">Thành Tiền</div></div>
+                          <div className="mt-1 space-y-0.5 flex-1 overflow-y-auto pr-2">
+                              {denominations.map((denom, index) => (<div key={denom.value} className="grid grid-cols-12 items-center gap-4 px-2 py-1 rounded-md hover:bg-slate-50 transition-colors duration-150"><div className="col-span-5 font-semibold text-slate-700 text-base">{new Intl.NumberFormat('vi-VN').format(denom.value)}</div><div className="col-span-3"><input id={`denom-${denom.value}`} type="number" min="0" value={counts[denom.value] || ''} onChange={(e) => handleCountChange(denom.value, e.target.value)} onKeyDown={(e) => handleKeyDown(e, index)} placeholder="0" className="w-full border border-slate-300 rounded-md py-1.5 text-center text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-lg font-semibold" aria-label={`Số lượng tờ ${formatCurrency(denom.value)}`}/></div><div className="col-span-4 text-right font-mono text-slate-800 font-semibold text-base">{subtotals[denom.value] ? new Intl.NumberFormat('vi-VN').format(subtotals[denom.value]) : '0'}<span className="text-sm text-slate-500 font-sans ml-1">₫</span></div></div>))}
+                          </div>
+                      </div>
+                  </div>
+              </div>
+              <footer className="text-center mt-6 text-slate-500 text-sm">
+                  {lastResetTime ? (<p className="font-mono text-base mb-1">Thời gian kiểm quỹ cuối: {lastResetTime.toLocaleTimeString('vi-VN')} - {lastResetTime.toLocaleDateString('vi-VN')}</p>) : (<p className="font-mono text-base mb-1">Nhấn 'Làm Mới' để bắt đầu phiên kiểm quỹ</p>)}
+                  <p>Thiết kế bởi 51118 - Đào Thế Anh</p>
+              </footer>
+            </div>
+          </>
+        );
+      case 'kiem-ke':
+        return (
+          <div className="w-full max-w-7xl">
+            <header className="text-center mb-8">
+                <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">KIỂM KÊ HÀNG HÓA</h1>
+                <div className="mt-4 w-full max-w-lg mx-auto">
+                    <div className="flex items-center gap-3">
+                        <label htmlFor="excel-upload" className="flex-grow flex items-center justify-between w-full h-12 bg-white border border-slate-300 rounded-lg shadow-sm cursor-pointer hover:bg-slate-50 transition-colors duration-200 overflow-hidden">
+                            <span className="pl-4 text-sm text-slate-500 truncate">
+                                {fileName || 'Chọn file Excel để bắt đầu...'}
+                            </span>
+                            <span className="flex items-center justify-center h-full px-5 bg-indigo-600 text-white font-semibold rounded-r-md hover:bg-indigo-700 transition-colors duration-200 text-sm whitespace-nowrap">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M9.25 13.25a.75.75 0 001.5 0V4.856l2.188 2.428a.75.75 0 001.11-1.028l-3.5-3.888a.75.75 0 00-1.11 0l-3.5 3.888a.75.75 0 001.11 1.028L9.25 4.856v8.394z" /><path d="M3.75 16a.75.75 0 000 1.5h12.5a.75.75 0 000-1.5H3.75z" /></svg>
+                                Nhập từ Excel
+                            </span>
+                        </label>
+                        <input id="excel-upload" type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileImport} />
+                        {inventoryItems.length > 0 && (
+                            <button
+                                onClick={handleInventoryReset}
+                                className="flex-shrink-0 flex items-center justify-center gap-2 px-4 h-12 bg-[#3498db] text-white font-semibold rounded-lg hover:bg-[#2980b9] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#3498db] focus:ring-offset-white transition-colors duration-200 text-sm"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.933 13.041a8 8 0 1 1 -9.925 -8.788c3.899 -1 7.935 1.007 9.425 4.747" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M20 4v5h-5" />
+                                </svg>
+                                <span>Làm Mới</span>
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </header>
+
+            {inventoryItems.length > 0 && (
+                <div className="my-6 p-4 bg-slate-100 rounded-lg border border-slate-200/80 flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
+                    <div className="flex items-center gap-2">
+                        <label htmlFor="imei-filter" className="text-sm font-medium text-slate-600 shrink-0">Hiển thị:</label>
+                        <div className="relative">
+                            <select
+                                id="imei-filter"
+                                value={imeiFilter}
+                                onChange={(e) => setImeiFilter(e.target.value as any)}
+                                className="w-56 appearance-none block bg-white border border-slate-300 rounded-md py-2 pl-3 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition hover:border-slate-400"
+                            >
+                                <option value="all">Tất cả sản phẩm</option>
+                                <option value="with_imei">Sản phẩm có IMEI</option>
+                                <option value="without_imei">Sản phẩm không có IMEI</option>
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                                <svg className="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <label htmlFor="category-filter" className="text-sm font-medium text-slate-600 shrink-0">Ngành hàng:</label>
+                        <div className="relative">
+                            <select
+                                id="category-filter"
+                                value={categoryFilter}
+                                onChange={(e) => setCategoryFilter(e.target.value)}
+                                className="w-56 appearance-none block bg-white border border-slate-300 rounded-md py-2 pl-3 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition hover:border-slate-400"
+                            >
+                                <option value="all">Tất cả ngành hàng</option>
+                                {availableCategories.map(cat => (
+                                    <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                            </select>
+                             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                                <svg className="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <label htmlFor="status-filter" className="text-sm font-medium text-slate-600 shrink-0">Trạng thái:</label>
+                        <div className="relative">
+                            <select
+                                id="status-filter"
+                                value={statusFilter}
+                                onChange={(e) => setStatusFilter(e.target.value)}
+                                className="w-56 appearance-none block bg-white border border-slate-300 rounded-md py-2 pl-3 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition hover:border-slate-400"
+                            >
+                                <option value="all">Tất cả trạng thái</option>
+                                {availableStatuses.map(status => (
+                                    <option key={status} value={status}>{status}</option>
+                                ))}
+                            </select>
+                             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                                <svg className="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                            </div>
+                        </div>
+                    </div>
+                    <button onClick={handleExportUncheckedItems} className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white font-semibold rounded-lg hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 focus:ring-offset-white transition-colors duration-200 text-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                           <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clipRule="evenodd" />
+                        </svg>
+                        Xuất SP Chưa Kiểm
+                    </button>
+                </div>
+            )}
+            
+            {filteredInventoryItems.length > 0 ? (
+              <div className="mt-2 bg-white p-4 rounded-xl shadow-md border border-slate-200/80 w-full overflow-x-auto">
+                <table className="w-full text-sm text-left text-slate-600">
+                  <thead className="text-xs text-slate-700 uppercase bg-slate-50">
+                    <tr>
+                      <th scope="col" className="p-4 w-16 text-center">Đã kiểm</th>
+                      <th scope="col" className="px-4 py-3 w-48 text-center">Mã QR</th>
+                      <th scope="col" className="px-6 py-3">Tên sản phẩm</th>
+                      <th scope="col" className="px-6 py-3 w-32 text-center">Số lượng</th>
+                      <th scope="col" className="px-6 py-3 w-40 text-center">Trạng thái</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredInventoryItems.map((item) => {
+                      const isDimmed = hoveredRowIndex !== null && hoveredRowIndex !== item.originalIndex;
+                      const isCheckedAndDimmed = item.checked;
+
+                      const rowClasses = `bg-white border-b hover:bg-slate-50 cursor-pointer transition-all duration-200`;
+                      const qrClasses = `transition-opacity duration-200 ${isDimmed || isCheckedAndDimmed ? 'opacity-0' : ''}`;
+                      const infoClasses = `transition-opacity duration-200 ${isDimmed || isCheckedAndDimmed ? 'opacity-60' : ''}`;
+                      const checkedClasses = item.checked ? 'line-through' : '';
+
+                      return (
+                      <tr key={item.originalIndex} 
+                          id={`inventory-item-${item.originalIndex}`}
+                          onClick={() => handleCheckItem(item.originalIndex)}
+                          onMouseEnter={() => setHoveredRowIndex(item.originalIndex)}
+                          onMouseLeave={() => setHoveredRowIndex(null)}
+                          className={`${rowClasses} ${checkedClasses}`}>
+                        <td className={`p-4 text-center ${infoClasses}`}>
+                          <input type="checkbox" checked={item.checked} readOnly className="w-5 h-5 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500 focus:ring-2 pointer-events-none"/>
+                        </td>
+                        <td className={`px-4 py-2 text-center ${qrClasses}`}>
+                            <div className="flex flex-col items-center justify-center">
+                                <div className="w-16 h-16 mb-2">
+                                    <QRCodeComponent text={item.qrCode} size={64} />
+                                </div>
+                                <span className="text-xs font-sans text-slate-500 break-all">{item.qrCode}</span>
+                            </div>
+                        </td>
+                        <td className={`px-6 py-4 font-medium text-slate-900 text-lg ${infoClasses}`}>
+                           <div className="flex items-center gap-3">
+                                <CategoryIcon category={item.category} className="h-5 w-5 text-slate-500 flex-shrink-0" />
+                                <span>{item.productName}</span>
+                            </div>
+                        </td>
+                        <td className={`px-6 py-4 text-center font-semibold text-lg ${infoClasses}`}>{item.quantity}</td>
+                        <td className={`px-6 py-4 text-center ${infoClasses}`}>{item.status}</td>
+                      </tr>
+                    )})}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+                fileName 
+                ? (
+                    <div className="text-center py-10 px-4 mt-6 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200">
+                        <p className="text-slate-500">Không tìm thấy sản phẩm nào phù hợp với bộ lọc.</p>
+                    </div>
+                ) 
+                : (
+                    <div className="text-left py-10 px-8 mt-6 bg-white rounded-xl shadow-md border border-slate-200/80 max-w-3xl mx-auto">
+                        <div className="flex items-center gap-4 mb-5">
+                            <div className="flex-shrink-0 bg-indigo-100 rounded-full p-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </div>
+                            <h2 className="text-xl font-bold text-slate-800">Hướng Dẫn Chức Năng Kiểm Kê</h2>
+                        </div>
+                        <div className="space-y-4 text-slate-600">
+                           <p>Đối soát hàng hóa nhanh chóng từ file Excel. Tải file lên, click vào từng dòng để đánh dấu đã kiểm, và xuất ra file riêng các sản phẩm chưa được kiểm.</p>
+                             <h3 className="font-semibold text-slate-700 mb-2 text-base">Yêu cầu file Excel:</h3>
+                              <ul className="list-disc list-inside space-y-1.5 pl-4 text-sm">
+                                  <li><strong>Bắt buộc:</strong> Cột <code>Tên sản phẩm</code>, <code>Số lượng</code>.</li>
+                                  <li><strong>Khuyến nghị:</strong> Cột <code>Giá bán</code>, <code>IMEI_1</code> (để tạo QR), <code>Mã sản phẩm</code>, <code>Ngành hàng</code>, <code>trạng thái sản phẩm</code>.</li>
+                              </ul>
+                        </div>
+                    </div>
+                )
+            )}
+          </div>
+        );
+      case 'kiem-tra-ton-kho':
+        return (
+          <div className="w-full max-w-4xl mx-auto">
+              <header className="text-center mb-8">
+                <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">KIỂM TRA TỒN KHO</h1>
+                 <div className="mt-4 w-full max-w-lg mx-auto">
+                    <label htmlFor="excel-upload-search" className="flex items-center justify-between w-full h-12 bg-white border border-slate-300 rounded-lg shadow-sm cursor-pointer hover:bg-slate-50 transition-colors duration-200 overflow-hidden">
+                        <span className="pl-4 text-sm text-slate-500 truncate">
+                            {fileName || 'Chọn file Excel để bắt đầu...'}
+                        </span>
+                        <span className="flex items-center justify-center h-full px-5 bg-indigo-600 text-white font-semibold rounded-r-md hover:bg-indigo-700 transition-colors duration-200 text-sm whitespace-nowrap">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M9.25 13.25a.75.75 0 001.5 0V4.856l2.188 2.428a.75.75 0 001.11-1.028l-3.5-3.888a.75.75 0 00-1.11 0l-3.5 3.888a.75.75 0 001.11 1.028L9.25 4.856v8.394z" /><path d="M3.75 16a.75.75 0 000 1.5h12.5a.75.75 0 000-1.5H3.75z" /></svg>
+                            Nhập từ Excel
+                        </span>
+                    </label>
+                    <input id="excel-upload-search" type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileImport} />
+                </div>
+            </header>
+
+            {inventoryItems.length > 0 ? (
+                <div className="w-full">
+                    <form onSubmit={handleSearchSubmit} className="relative mb-6">
+                        <input
+                            ref={searchInputRef}
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onFocus={() => {
+                                if (searchQuery.trim().length > 1 && suggestions.length > 0) {
+                                     setIsSuggestionsVisible(true);
+                                }
+                            }}
+                            onBlur={() => setTimeout(() => setIsSuggestionsVisible(false), 200)}
+                            placeholder="Quét mã hoặc tìm theo tên sản phẩm..."
+                            className="w-full pl-5 pr-12 py-3 text-lg bg-white border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                            autoFocus
+                            autoComplete="off"
+                        />
+                         <div className="absolute inset-y-0 right-0 flex items-center pr-5 pointer-events-none">
+                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                        </div>
+                        {isSuggestionsVisible && suggestions.length > 0 && (
+                            <div className="absolute top-full left-0 right-0 mt-1.5 w-full bg-white rounded-lg shadow-xl border border-slate-200 z-10 max-h-72 overflow-y-auto">
+                                <ul className="py-1">
+                                    {suggestions.map((suggestion) => (
+                                        <li
+                                            key={suggestion.originalIndex}
+                                            className="px-4 py-2.5 text-slate-700 hover:bg-indigo-50 cursor-pointer"
+                                            onMouseDown={() => handleSuggestionClick(suggestion)}
+                                        >
+                                            <p className="font-semibold text-base text-slate-800">{suggestion.productName}</p>
+                                            <p className="text-sm text-slate-500">
+                                                Mã: <span className="font-mono">{suggestion.productCodeForSearch || suggestion.qrCode}</span> - SL: <span className="font-mono">{suggestion.quantity}</span>
+                                            </p>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                    </form>
+                    
+                    <div className="space-y-4">
+                        {searchHistory.map((item, index) => (
+                          <div key={index} className={`p-5 rounded-lg border-l-8 shadow-md transition-all duration-300 bg-white ${item.result ? 'border-green-500' : 'border-red-500'} ${index === 0 ? 'transform scale-105 shadow-lg' : 'opacity-80'}`}>
+                              <p className="text-xs text-slate-500 mb-3">Đã tìm kiếm: <span className="font-mono font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">{item.query}</span></p>
+                              {item.result ? (
+                                <div className="space-y-4">
+                                    <h3 className="text-xl font-bold text-slate-900 flex items-center gap-3">
+                                        <CategoryIcon category={item.result.category} className="h-6 w-6 text-slate-700" />
+                                        <span>{item.result.productName}</span>
+                                    </h3>
+                                    <div className="flex flex-wrap items-center gap-3 text-sm">
+                                        <div className="flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-full">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+                                            <span className="font-medium">Số lượng:</span>
+                                            <span className="font-bold font-mono text-indigo-600 text-base">{item.result.quantity}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-full">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" /></svg>
+                                            <span className="font-medium">Trạng thái:</span>
+                                            <span className="font-semibold">{item.result.status}</span>
+                                        </div>
+                                         <div className="flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-full">
+                                            <CategoryIcon category={item.result.category} />
+                                            <span className="font-medium">Ngành hàng:</span>
+                                            <span className="font-semibold">{item.result.category}</span>
+                                        </div>
+                                        {item.result.productCodeForSearch && (
+                                            <div className="flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-full">
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M16 4v12l-4-2-4 2V4M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                <span className="font-medium">Mã SP:</span>
+                                                <span className="font-semibold font-mono">{item.result.productCodeForSearch}</span>
+                                            </div>
+                                        )}
+                                        {item.result.hasImei && (
+                                            <div className="flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-full">
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m-4-14v12m-4-10v8m12-9v10m-4-8v6" /></svg>
+                                                <span className="font-medium">IMEI:</span>
+                                                <span className="font-semibold font-mono">{item.result.qrCode}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-3">
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                  <p className="text-lg font-semibold text-red-700">Không tìm thấy sản phẩm.</p>
+                                </div>
+                              )}
+                          </div>
+                        ))}
+                    </div>
+
+                </div>
+            ) : (
+                <div className="text-left py-10 px-8 mt-6 bg-white rounded-xl shadow-md border border-slate-200/80 max-w-3xl mx-auto">
+                    <div className="flex items-center gap-4 mb-5">
+                        <div className="flex-shrink-0 bg-indigo-100 rounded-full p-3">
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        </div>
+                        <h2 className="text-xl font-bold text-slate-800">Hướng Dẫn Chức Năng Tra Tồn Kho</h2>
+                    </div>
+                    <div className="space-y-4 text-slate-600">
+                        <p>Tra cứu thông tin sản phẩm tức thì từ file tồn kho. Tải file lên, sau đó quét mã vạch hoặc nhập mã/tên sản phẩm vào ô tìm kiếm để xem chi tiết.</p>
+                    </div>
+                </div>
+            )}
+          </div>
+        );
+       case 'kiem-hang-chuyen-kho':
+            return (
+                <div className="w-full max-w-7xl">
+                    <header className="text-center mb-8">
+                        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">KIỂM HÀNG CHUYỂN KHO</h1>
+                        <div className="mt-6 w-full max-w-lg mx-auto">
+                            <div className="flex items-center gap-3">
+                                <label htmlFor="excel-check-upload" className="flex-grow flex items-center justify-between w-full h-12 bg-white border border-slate-300 rounded-lg shadow-sm cursor-pointer hover:bg-slate-50 transition-colors duration-200 overflow-hidden">
+                                    <span className="pl-4 text-sm text-slate-500 truncate">{excelCheckFileName || 'Chọn file Excel để bắt đầu...'}</span>
+                                    <span className="flex items-center justify-center h-full px-5 bg-indigo-600 text-white font-semibold rounded-r-md hover:bg-indigo-700 transition-colors duration-200 text-sm whitespace-nowrap">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M9.25 13.25a.75.75 0 001.5 0V4.856l2.188 2.428a.75.75 0 001.11-1.028l-3.5-3.888a.75.75 0 00-1.11 0l-3.5 3.888a.75.75 0 001.11 1.028L9.25 4.856v8.394z" /><path d="M3.75 16a.75.75 0 000 1.5h12.5a.75.75 0 000-1.5H3.75z" /></svg>
+                                        Nhập từ Excel
+                                    </span>
+                                </label>
+                                <input id="excel-check-upload" type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileImportForExcelCheck} />
+                                {excelCheckItems.length > 0 && (
+                                    <button onClick={handleExcelCheckReset} className="flex-shrink-0 flex items-center justify-center gap-2 px-4 h-12 bg-[#3498db] text-white font-semibold rounded-lg hover:bg-[#2980b9] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#3498db] focus:ring-offset-white transition-colors duration-200 text-sm">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.933 13.041a8 8 0 1 1 -9.925 -8.788c3.899 -1 7.935 1.007 9.425 4.747" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M20 4v5h-5" />
+                                        </svg>
+                                        <span>Làm Mới</span>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </header>
+
+                    {excelCheckItems.length > 0 ? (
+                        <>
+                            <div className="mb-6 p-6 bg-slate-100 rounded-xl border border-slate-200/80 max-w-3xl mx-auto">
+                                <form onSubmit={handleScanSubmit} className="relative">
+                                    <label htmlFor="scan-input" className="block text-sm font-medium text-slate-700 mb-2">Khu vực quét mã (Mã SP hoặc IMEI)</label>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m-4-14v12m-4-10v8m12-9v10m-4-8v6" /></svg>
+                                        </div>
+                                        <input
+                                            id="scan-input"
+                                            ref={scanInputRef}
+                                            type="text"
+                                            value={scanQuery}
+                                            onChange={(e) => {
+                                                setScanQuery(e.target.value);
+                                                if (scanStatus.type !== 'idle') setScanStatus({ type: 'idle', message: 'Sẵn sàng quét...' });
+                                            }}
+                                            placeholder="Đặt con trỏ vào đây và quét..."
+                                            className="w-full pl-14 pr-4 py-3 text-lg bg-white border-2 border-slate-300 rounded-lg shadow-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                                            autoComplete="off"
+                                        />
+                                    </div>
+                                    <p className={`mt-2 text-sm h-5 transition-colors ${scanStatus.type === 'success' ? 'text-green-600' : scanStatus.type === 'error' ? 'text-red-600' : 'text-slate-500'}`}>
+                                        {scanStatus.message}
+                                    </p>
+                                </form>
+                            </div>
+
+                            <div className="my-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <StatCard title="Tổng SL (File)" value={formatNumber(excelCheckStats.totalFileQuantity) || '0'} />
+                                <StatCard title="Tổng SL (Thực Tế)" value={formatNumber(excelCheckStats.totalActualQuantity) || '0'} className="!bg-indigo-500/10 !border-indigo-200" />
+                                <StatCard title="Số Lượng Khớp" value={excelCheckStats.matchedCount} className="!bg-green-500/10 !border-green-200" />
+                                <StatCard title="Số Lượng Lệch" value={excelCheckStats.mismatchedCount} className="!bg-red-500/10 !border-red-200" />
+                            </div>
+
+                            <div className="flex justify-center mb-6">
+                                <button onClick={handleExportExcelCheckResult} className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 focus:ring-offset-white transition-colors duration-200 text-sm">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clipRule="evenodd" /></svg>
+                                    Xuất Kết Quả
+                                </button>
+                            </div>
+
+                            <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200/80 w-full overflow-x-auto">
+                                <table className="w-full text-sm text-left text-slate-600">
+                                    <thead className="text-xs text-slate-700 uppercase bg-slate-50">
+                                        <tr>
+                                            <th scope="col" className="px-6 py-3 min-w-[300px]">Tên sản phẩm</th>
+                                            <th scope="col" className="px-6 py-3 w-40 text-center">SL (File)</th>
+                                            <th scope="col" className="px-6 py-3 w-48 text-center">SL (Thực Tế)</th>
+                                            <th scope="col" className="px-6 py-3 w-40 text-center">Chênh lệch</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {excelCheckItems.map((item, index) => {
+                                            const difference = item.actualQuantity !== null ? item.actualQuantity - item.fileQuantity : null;
+                                            let rowColor = 'bg-white';
+                                            let diffColor = 'text-slate-700';
+                                            if (difference !== null) {
+                                                if (difference === 0) { rowColor = 'bg-green-50'; diffColor = 'text-green-600'; }
+                                                else if (difference > 0) { rowColor = 'bg-amber-50'; diffColor = 'text-amber-600'; }
+                                                else { rowColor = 'bg-red-50'; diffColor = 'text-red-600'; }
+                                            }
+                                            const isLastScanned = lastScannedIndex === index;
+
+                                            return (
+                                                <tr key={index} id={`excel-check-item-tr-${index}`} className={`${rowColor} border-b transition-all duration-500 ${isLastScanned ? 'ring-2 ring-indigo-500 ring-offset-2' : ''}`}>
+                                                    <td className="px-6 py-4 font-medium text-slate-900">
+                                                        <div className="flex items-center gap-3">
+                                                          <CategoryIcon category={item.category} className="h-5 w-5 text-slate-500 flex-shrink-0" />
+                                                          <div>
+                                                              {item.productName}
+                                                              <br/>
+                                                              <span className="text-xs font-mono text-slate-500">{item.productCode}</span>
+                                                          </div>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center font-bold text-lg">{item.fileQuantity}</td>
+                                                    <td className="px-6 py-4">
+                                                        <input 
+                                                            id={`excel-check-item-${index}`}
+                                                            type="number" 
+                                                            min="0"
+                                                            value={item.actualQuantity ?? ''} 
+                                                            onChange={(e) => handleActualQuantityChange(index, e.target.value)} 
+                                                            onKeyDown={(e) => handleExcelCheckKeyDown(e, index)}
+                                                            placeholder="Nhập..." 
+                                                            className="w-full border border-slate-300 rounded-md py-1.5 text-center text-slate-900 text-lg font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                                        />
+                                                    </td>
+                                                    <td className={`px-6 py-4 text-center font-bold text-lg ${diffColor}`}>
+                                                        {difference !== null ? (difference > 0 ? `+${difference}` : difference) : '-'}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            {mismatchedItems.length > 0 && (
+                                <div className="mt-8">
+                                    <h2 className="text-xl font-bold text-slate-800 mb-4 text-center">Danh Sách Sản Phẩm Chênh Lệch</h2>
+                                    <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200/80 w-full max-w-4xl mx-auto">
+                                        <ul className="divide-y divide-slate-200">
+                                            {mismatchedItems.map((item, index) => {
+                                                 const difference = item.actualQuantity! - item.fileQuantity;
+                                                 const isMissing = difference < 0;
+                                                 return (
+                                                    <li key={`mismatch-${index}`} className={`py-3 px-2 flex justify-between items-center ${isMissing ? 'bg-red-50/50' : 'bg-amber-50/50'}`}>
+                                                        <div>
+                                                            <p className="font-semibold text-slate-800">{item.productName}</p>
+                                                            <p className="text-sm font-mono text-slate-500">{item.productCode}</p>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className={`font-bold text-lg ${isMissing ? 'text-red-600' : 'text-amber-600'}`}>
+                                                                {isMissing ? `Thiếu ${Math.abs(difference)}` : `Thừa ${difference}`}
+                                                            </p>
+                                                            <p className="text-sm text-slate-500 font-mono">
+                                                                File: {item.fileQuantity} | TT: {item.actualQuantity}
+                                                            </p>
+                                                        </div>
+                                                    </li>
+                                                 )
+                                            })}
+                                        </ul>
+                                    </div>
+                                </div>
+                            )}
+
+                        </>
+                    ) : (
+                        <div className="text-left py-10 px-8 mt-6 bg-white rounded-xl shadow-md border border-slate-200/80 max-w-3xl mx-auto">
+                            <div className="flex items-center gap-4 mb-5">
+                                <div className="flex-shrink-0 bg-indigo-100 rounded-full p-3">
+                                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                </div>
+                                <h2 className="text-xl font-bold text-slate-800">Hướng Dẫn Chức Năng Kiểm Hàng</h2>
+                            </div>
+                             <div className="space-y-4 text-slate-600">
+                                <p>Đối soát số lượng hàng hóa thực tế so với file Excel. Tải file lên, dùng máy quét để cập nhật số lượng, và xuất báo cáo chênh lệch.</p>
+                                <h3 className="font-semibold text-slate-700 mb-2 text-base">Yêu cầu file Excel:</h3>
+                                <ul className="list-disc list-inside space-y-1.5 pl-4 text-sm">
+                                  <li><strong>Bắt buộc:</strong> Cột <code>Tên sản phẩm</code>, <code>Số lượng</code>.</li>
+                                  <li><strong>Khuyến nghị:</strong> Cột <code>Mã sản phẩm</code> và/hoặc <code>IMEI_1</code> để quét mã vạch.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+      case 'thay-posm':
+        return (
+          <div className="w-full max-w-7xl">
+            <header className="text-center mb-8">
+                <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">THAY ĐỔI BẢNG GIÁ (POSM)</h1>
+                <div className="mt-6 w-full max-w-3xl mx-auto">
+                    <div className="flex items-center gap-3">
+                        <label htmlFor="posm-upload" className="flex-grow flex items-center justify-between w-full h-12 bg-white border border-slate-300 rounded-lg shadow-sm cursor-pointer hover:bg-slate-50 transition-colors duration-200 overflow-hidden">
+                            <span className="pl-4 text-sm text-slate-500 truncate">{posmFileName || 'Chọn file Excel để bắt đầu...'}</span>
+                            <span className="flex items-center justify-center h-full px-5 bg-indigo-600 text-white font-semibold rounded-r-md hover:bg-indigo-700 transition-colors duration-200 text-sm whitespace-nowrap">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M9.25 13.25a.75.75 0 001.5 0V4.856l2.188 2.428a.75.75 0 001.11-1.028l-3.5-3.888a.75.75 0 00-1.11 0l-3.5 3.888a.75.75 0 001.11 1.028L9.25 4.856v8.394z" /><path d="M3.75 16a.75.75 0 000 1.5h12.5a.75.75 0 000-1.5H3.75z" /></svg>
+                                Nhập từ Excel
+                            </span>
+                        </label>
+                        <input id="posm-upload" type="file" className="hidden" accept=".xlsx, .xls" onChange={handlePosmFileImport} />
+                        {posmItems.length > 0 && (
+                            <button onClick={handlePosmReset} className="flex-shrink-0 flex items-center justify-center gap-2 px-4 h-12 bg-[#3498db] text-white font-semibold rounded-lg hover:bg-[#2980b9] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#3498db] focus:ring-offset-white transition-colors duration-200 text-sm">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.933 13.041a8 8 0 1 1 -9.925 -8.788c3.899 -1 7.935 1.007 9.425 4.747" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M20 4v5h-5" />
+                                </svg>
+                                <span>Làm Mới</span>
+                            </button>
+                        )}
+                    </div>
+                </div>
+                 {posmItems.length > 0 && (
+                    <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                         <span className="text-sm font-semibold text-slate-700 mr-2">Tuỳ chọn in ({selectedPosmItems.length} đã chọn):</span>
+                         <button onClick={() => handlePrintPosm('a5-2')} disabled={selectedPosmItems.length === 0} className="px-4 py-2 text-sm bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed">In khổ A5 (2SP)</button>
+                         <button onClick={() => handlePrintPosm('a6-2')} disabled={selectedPosmItems.length === 0} className="px-4 py-2 text-sm bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed">In khổ A6 (2SP)</button>
+                    </div>
+                 )}
+            </header>
+
+            {posmItems.length > 0 ? (
+                <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200/80 w-full overflow-x-auto">
+                    <table className="w-full text-sm text-left text-slate-600">
+                        <thead className="text-xs text-slate-700 uppercase bg-slate-50">
+                            <tr>
+                                <th scope="col" className="p-4 w-16 text-center">
+                                     <input
+                                        type="checkbox"
+                                        className="w-5 h-5 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500 focus:ring-2"
+                                        checked={posmItems.length > 0 && selectedPosmItems.length === posmItems.length}
+                                        onChange={handlePosmSelectAll}
+                                        aria-label="Chọn tất cả"
+                                    />
+                                </th>
+                                <th scope="col" className="px-6 py-3 min-w-[250px]">Tên sản phẩm</th>
+                                <th scope="col" className="px-6 py-3 w-48 text-right">Giá Cũ</th>
+                                <th scope="col" className="px-6 py-3 w-48 text-right">Giá Mới</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {posmItems.map((item, index) => (
+                                <tr key={`${item.productCode}-${index}`} className="bg-white border-b hover:bg-slate-50">
+                                    <td className="p-4 text-center">
+                                         <input
+                                            type="checkbox"
+                                            className="w-5 h-5 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500 focus:ring-2"
+                                            checked={selectedPosmItems.includes(item.productCode)}
+                                            onChange={() => handlePosmSelect(item.productCode)}
+                                        />
+                                    </td>
+                                    <td className="px-6 py-4 font-medium text-slate-900">
+                                        {item.productName}
+                                        <br/>
+                                        <span className="text-xs font-mono text-slate-500">{item.productCode.split('-')[0]}</span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right font-mono text-slate-500">{formatCurrency(item.oldPrice)}</td>
+                                    <td className="px-6 py-4 text-right font-mono font-bold text-indigo-600 text-base">{formatCurrency(item.newPrice)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            ) : (
+                <div className="text-left py-10 px-8 mt-6 bg-white rounded-xl shadow-md border border-slate-200/80 max-w-3xl mx-auto">
+                    <div className="flex items-center gap-4 mb-5">
+                        <div className="flex-shrink-0 bg-indigo-100 rounded-full p-3">
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        </div>
+                        <h2 className="text-xl font-bold text-slate-800">Hướng Dẫn In Bảng Giá (POSM)</h2>
+                    </div>
+                     <div className="space-y-4 text-slate-600">
+                        <p>Tạo và in bảng giá (POSM) tự động từ file Excel. Ứng dụng sẽ tự nhận diện các cột Tên sản phẩm, Giá cũ, Giá mới, và Khuyến mãi để tạo bảng giá chuyên nghiệp.</p>
+                         <h3 className="font-semibold text-slate-700 mb-2 text-base">Cơ chế nhận diện cột:</h3>
+                            <ul className="list-disc list-inside space-y-1.5 pl-4 text-sm">
+                                <li><strong>Ưu tiên 1:</strong> Tìm chính xác các cột có tiêu đề: <code>Tên sản phẩm</code>, <code>Mã sản phẩm</code>, <code>Giá gốc</code>/<code>Giá cũ</code>, <code>Giá mới</code>/<code>Giá sau giảm</code>, <code>Khuyến mãi</code>.</li>
+                                <li><strong>Ưu tiên 2 (Nếu không có tiêu đề):</strong> Mặc định lấy dữ liệu từ các cột: <strong>Z</strong> (Tên SP), <strong>AA</strong> (Mã SP), <strong>P</strong> (Giá cũ), <strong>Q</strong> (Giá mới), <strong>AD</strong> (Khuyến mãi).</li>
+                            </ul>
+                    </div>
+                </div>
+            )}
+          </div>
+        );
+      case 'thong-tin':
+        return (
+            <div className="w-full max-w-6xl mx-auto">
+                <div className="text-center mb-12">
+                    <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900">Thông Tin Ứng Dụng</h1>
+                    <p className="mt-4 text-lg text-slate-600 max-w-3xl mx-auto">
+                        Công cụ hỗ trợ toàn diện giúp tối ưu hóa và đơn giản hóa các nghiệp vụ hàng ngày. Dưới đây là lịch sử các phiên bản cập nhật.
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                    <div className="lg:col-span-2 bg-white p-8 rounded-xl shadow-lg border border-slate-200/80">
+                        <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-3">
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                            Lịch sử cập nhật
+                        </h2>
+                        <div className="space-y-8">
+                             <div>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                    <span className="bg-indigo-600 text-white font-bold text-sm px-3 py-1 rounded-full">v1.4.0</span>
+                                    <h3 className="text-lg font-semibold text-slate-800">Tối ưu & Đồng bộ hóa</h3>
+                                    <span className="text-sm text-slate-500">22/07/2024</span>
+                                </div>
+                                <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Đồng bộ hóa giao diện và văn bản của thanh "Nhập từ Excel" trên toàn bộ ứng dụng.</li>
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Tối ưu hóa bố cục và font chữ trong chức năng in POSM (khổ A6) để đảm bảo không bị mất thông tin.</li>
+                                     <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-red-100 text-red-800">[SỬA LỖI]</span>Rút gọn nội dung khuyến mãi quá dài và tinh chỉnh lại toàn bộ phần diễn giải, hướng dẫn trong các chức năng.</li>
+                                </ul>
+                            </div>
+                            
+                            <div>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                    <span className="bg-slate-500 text-white font-bold text-sm px-3 py-1 rounded-full">v1.3.0</span>
+                                    <h3 className="text-lg font-semibold text-slate-800">Giao diện mới & In POSM</h3>
+                                    <span className="text-sm text-slate-500">20/07/2024</span>
+                                </div>
+                                <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[MỚI]</span>Thêm chức năng "Thay POSM" để tự động tạo và in bảng giá khuyến mãi từ file Excel.</li>
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Tối ưu hóa giao diện trang chủ, sắp xếp các chức năng gọn gàng trên một hàng ngang.</li>
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Làm mới trang thông tin, bổ sung chi tiết lịch sử cập nhật phiên bản.</li>
+                                </ul>
+                            </div>
+
+                             <div>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                    <span className="bg-slate-500 text-white font-bold text-sm px-3 py-1 rounded-full">v1.2.0</span>
+                                    <h3 className="text-lg font-semibold text-slate-800">Kiểm Hàng Chuyển Kho</h3>
+                                    <span className="text-sm text-slate-500">10/07/2024</span>
+                                </div>
+                                <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[MỚI]</span>Thêm chức năng "Kiểm Hàng Chuyển Kho" sử dụng máy quét mã vạch để đối soát nhanh.</li>
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Tăng tốc độ đọc và xử lý file Excel ở tất cả các chức năng.</li>
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-red-100 text-red-800">[SỬA LỖI]</span>Khắc phục lỗi không nhận diện được mã sản phẩm/IMEI có chứa ký tự đặc biệt.</li>
+                                </ul>
+                            </div>
+                            
+                            <div>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                    <span className="bg-slate-500 text-white font-bold text-sm px-3 py-1 rounded-full">v1.1.0</span>
+                                    <h3 className="text-lg font-semibold text-slate-800">Tra Cứu Tồn Kho & Xuất File</h3>
+                                    <span className="text-sm text-slate-500">25/06/2024</span>
+                                </div>
+                                <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[MỚI]</span>Thêm chức năng "Kiểm Tra Tồn Kho" để tìm kiếm thông tin sản phẩm tức thì.</li>
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Trong "Kiểm Kê", trang tự động cuộn đến sản phẩm chưa kiểm tiếp theo để tăng tốc độ làm việc.</li>
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Cho phép xuất file Excel danh sách các sản phẩm chưa được kiểm trong chức năng "Kiểm Kê".</li>
+                                </ul>
+                            </div>
+
+                             <div>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                    <span className="bg-slate-500 text-white font-bold text-sm px-3 py-1 rounded-full">v1.0.0</span>
+                                    <h3 className="text-lg font-semibold text-slate-800">Ra Mắt Ứng Dụng</h3>
+                                    <span className="text-sm text-slate-500">15/06/2024</span>
+                                </div>
+                                <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
+                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[MỚI]</span>Ra mắt phiên bản đầu tiên với hai chức năng cốt lõi: "Kiểm Quỹ Thu Ngân" và "Kiểm Kê Hàng Hóa".</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-8">
+                        <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200/80">
+                            <div className="flex items-center gap-4 mb-4">
+                                <div className="flex-shrink-0 bg-indigo-100 text-indigo-600 rounded-full p-2.5 inline-flex">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                    </svg>
+                                </div>
+                                <h2 className="text-xl font-bold text-slate-800">Mục Đích & Tính Năng</h2>
+                            </div>
+                            <p className="text-sm text-slate-600">Cung cấp bộ công cụ toàn diện để đơn giản hóa nghiệp vụ hàng ngày, từ quản lý tài chính đến kiểm kê hàng hóa, giúp tiết kiệm thời gian và tăng độ chính xác.</p>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200/80">
+                            <div className="flex items-center gap-4 mb-4">
+                                 <div className="flex-shrink-0 bg-indigo-100 text-indigo-600 rounded-full p-2.5 inline-flex">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                                    </svg>
+                                </div>
+                                <h2 className="text-xl font-bold text-slate-800">Nền Tảng Công Nghệ</h2>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <span className="bg-sky-100 text-sky-800 text-sm font-semibold px-2.5 py-1 rounded-full">React</span>
+                                <span className="bg-blue-100 text-blue-800 text-sm font-semibold px-2.5 py-1 rounded-full">TypeScript</span>
+                                <span className="bg-indigo-100 text-indigo-800 text-sm font-semibold px-2.5 py-1 rounded-full">Tailwind CSS</span>
+                            </div>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200/80">
+                            <div className="flex items-center gap-4 mb-4">
+                                <div className="flex-shrink-0 bg-indigo-100 text-indigo-600 rounded-full p-2.5 inline-flex">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                </div>
+                                <h2 className="text-xl font-bold text-slate-800">Thông Tin Tác Giả</h2>
+                            </div>
+                             <p className="text-slate-600 text-sm">
+                                Ứng dụng được thiết kế và phát triển bởi <strong className="text-slate-700">51118 - Đào Thế Anh</strong>.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+          );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="min-h-screen font-sans flex flex-col">
+       <header className="bg-white/80 backdrop-blur-sm shadow-sm sticky top-0 z-40 border-b border-slate-200/80">
+            <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="flex justify-start items-center h-16 space-x-6">
+                    <button onClick={() => setCurrentPage('trang-chu')} className={navItemClasses('trang-chu')}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 22V12h6v10" /></svg>
+                        <span>Trang chủ</span>
+                    </button>
+                     <div className="h-6 w-px bg-slate-200"></div>
+                     <button onClick={() => setCurrentPage('kiem-quy')} className={navItemClasses('kiem-quy')}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                        <span>Kiểm quỹ</span>
+                    </button>
+                    <button onClick={() => setCurrentPage('kiem-ke')} className={navItemClasses('kiem-ke')}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                        <span>Kiểm kê</span>
+                    </button>
+                    <button onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className={navItemClasses('kiem-hang-chuyen-kho')}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <span>Kiểm Hàng</span>
+                    </button>
+                    <button onClick={() => setCurrentPage('kiem-tra-ton-kho')} className={navItemClasses('kiem-tra-ton-kho')}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                        <span>Tra tồn kho</span>
+                    </button>
+                    <button onClick={() => setCurrentPage('thay-posm')} className={navItemClasses('thay-posm')}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                           <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <span>Thay POSM</span>
+                    </button>
+                    <div className="flex-grow"></div>
+                     <button onClick={() => setCurrentPage('thong-tin')} className={navItemClasses('thong-tin')}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <span>Thông tin</span>
+                    </button>
+                </div>
+            </nav>
+        </header>
+      <main className="w-full text-slate-800 flex flex-grow flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
+        {renderContent()}
+      </main>
+    </div>
+  );
+};
