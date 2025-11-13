@@ -131,11 +131,13 @@ const getCategoryFromProductName = (name: string): string => {
     if (lowerName.includes('máy giặt')) return 'máy giặt';
     if (lowerName.includes('máy lạnh') || lowerName.includes('điều hòa')) return 'máy lạnh';
     if (lowerName.includes('điện thoại')) return 'điện thoại';
+    if (lowerName.includes('loa')) return 'loa';
     return 'default';
 };
 
 const getCategoryIconName = (category: string): string => {
     const lowerCategory = category.toLowerCase();
+    if (lowerCategory.includes('loa')) return 'lucide-speaker';
     if (lowerCategory.includes('tivi') || lowerCategory.includes('ti vi') || /\btv\b/.test(lowerCategory)) return 'tv';
     if (lowerCategory.includes('tủ lạnh')) return 'kitchen';
     if (lowerCategory.includes('máy giặt')) return 'local_laundry_service';
@@ -147,6 +149,9 @@ const getCategoryIconName = (category: string): string => {
 
 const getIconSvg = (category: string, className: string = "") => {
     const iconName = getCategoryIconName(category);
+    if (iconName === 'lucide-speaker') {
+        return `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}" style="vertical-align: middle; display: inline-block;"><rect width="16" height="20" x="4" y="2" rx="2"/><circle cx="12" cy="14" r="4"/><line x1="12" x2="12.01" y1="6" y2="6"/></svg>`;
+    }
     // Using `vertical-align: middle` to better align font icons with text.
     return `<span class="material-symbols-outlined ${className}" style="vertical-align: middle;">${iconName}</span>`;
 };
@@ -176,6 +181,29 @@ const QRCodeComponent: React.FC<{ text: string, size?: number }> = ({ text, size
 
 const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ category, className = "text-base" }) => {
     const iconName = getCategoryIconName(category);
+    if (iconName === 'lucide-speaker') {
+        return (
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="1em"
+                height="1em"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={className}
+                style={{ verticalAlign: 'middle', display: 'inline-block' }}
+                aria-hidden="true"
+                focusable="false"
+            >
+                <rect width="16" height="20" x="4" y="2" rx="2" />
+                <circle cx="12" cy="14" r="4" />
+                <line x1="12" x2="12.01" y1="6" y2="6" />
+            </svg>
+        );
+    }
     return <span className={`material-symbols-outlined ${className}`}>{iconName}</span>;
 };
 
