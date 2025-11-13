@@ -1,3 +1,5 @@
+
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 
 // --- Type Declarations ---
@@ -132,7 +134,7 @@ const getCategoryFromProductName = (name: string): string => {
 const getIconSvg = (category: string, className: string = "") => {
     const lowerCategory = category.toLowerCase();
     if (lowerCategory.includes('tivi') || lowerCategory.includes('ti vi') || /\btv\b/.test(lowerCategory)) {
-        return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2" /><polyline points="16 3 12 7 8 3" /></svg>`;
+        return `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="${className}"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25A2.25 2.25 0 0 1 5.25 3h13.5A2.25 2.25 0 0 1 21 5.25Z" /></svg>`;
     }
     if (lowerCategory.includes('tủ lạnh')) {
         return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M5 10h14" /><path d="M9 6v2" /><path d="M9 14v2" /></svg>`;
@@ -180,7 +182,11 @@ const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ cate
     const lowerCategory = category.toLowerCase();
     
     if (lowerCategory.includes('tivi') || lowerCategory.includes('ti vi') || /\btv\b/.test(lowerCategory)) {
-        return <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="7" width="18" height="13" rx="2" /><polyline points="16 3 12 7 8 3" /></svg>;
+        return (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className={className}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25A2.25 2.25 0 0 1 5.25 3h13.5A2.25 2.25 0 0 1 21 5.25Z" />
+            </svg>
+        );
     }
     if (lowerCategory.includes('tủ lạnh')) {
         return <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M5 10h14" /><path d="M9 6v2" /><path d="M9 14v2" /></svg>;
@@ -241,6 +247,9 @@ export const App: React.FC = () => {
   const [posmItems, setPosmItems] = useState<PosmChangeItem[]>([]);
   const [posmFileName, setPosmFileName] = useState<string>('');
   const [selectedPosmItems, setSelectedPosmItems] = useState<string[]>([]);
+
+  // Static data
+  const vietQRString = '00020101021138530010A00000072701230006970407010903111993953037045802VN63042731';
 
   
   useEffect(() => {
@@ -422,7 +431,10 @@ export const App: React.FC = () => {
     window.XLSX.utils.book_append_sheet(workbook, worksheet, "LichSuKiemQuy");
     const colWidths = Object.keys(dataToExport[0]).map(key => ({ wch: Math.max(key.length, 20) }));
     worksheet["!cols"] = colWidths;
-    window.XLSX.writeFile(workbook, `LichSuKiemQuy_${new Date().toISOString().split('T')[0]}.xlsx`);
+    const today = new Date();
+    const localDate = new Date(today.getTime() - (today.getTimezoneOffset() * 60000));
+    const dateString = localDate.toISOString().split('T')[0];
+    window.XLSX.writeFile(workbook, `LichSuKiemQuy_${dateString}.xlsx`);
   };
   
   const loadHistoryItem = (checkId: number) => {
@@ -622,7 +634,10 @@ export const App: React.FC = () => {
     ];
     worksheet["!cols"] = colWidths;
 
-    window.XLSX.writeFile(workbook, `SP_ChuaKiem_${new Date().toISOString().split('T')[0]}.xlsx`);
+    const today = new Date();
+    const localDate = new Date(today.getTime() - (today.getTimezoneOffset() * 60000));
+    const dateString = localDate.toISOString().split('T')[0];
+    window.XLSX.writeFile(workbook, `SP_ChuaKiem_${dateString}.xlsx`);
   };
 
   const filteredInventoryItems = useMemo(() => {
@@ -838,7 +853,10 @@ export const App: React.FC = () => {
     
     worksheet["!cols"] = [{ wch: 20 }, { wch: 50 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
     
-    window.XLSX.writeFile(workbook, `KetQuaKiemHang_${new Date().toISOString().split('T')[0]}.xlsx`);
+    const today = new Date();
+    const localDate = new Date(today.getTime() - (today.getTimezoneOffset() * 60000));
+    const dateString = localDate.toISOString().split('T')[0];
+    window.XLSX.writeFile(workbook, `KetQuaKiemHang_${dateString}.xlsx`);
   };
 
   const handleExcelCheckKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, currentIndex: number) => {
@@ -1414,39 +1432,39 @@ export const App: React.FC = () => {
     switch (currentPage) {
       case 'trang-chu':
         return (
-          <div className="w-full max-w-7xl mx-auto text-center">
-             <h1 className="text-6xl sm:text-7xl font-extrabold text-slate-900 tracking-wide">TRANG HỖ TRỢ CÔNG VIỆC</h1>
-             <div className="mt-12 flex flex-row flex-nowrap items-stretch justify-center gap-6 text-center">
+          <div className="w-full max-w-7xl mx-auto flex flex-col items-center justify-center flex-grow pb-24">
+             <h1 className="text-6xl sm:text-7xl font-extrabold text-slate-900 tracking-wide text-center">TRANG HỖ TRỢ CÔNG VIỆC</h1>
+             <div className="mt-12 w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 text-center">
                 
-                <div onClick={() => setCurrentPage('kiem-quy')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-blue-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                <div onClick={() => setCurrentPage('kiem-quy')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-blue-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
                     <div className="flex-shrink-0 bg-blue-100 text-blue-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-blue-200">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-blue-600 transition-colors duration-300">Kiểm Quỹ Thu Ngân</h2>
                 </div>
 
-                <div onClick={() => setCurrentPage('kiem-ke')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-green-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                <div onClick={() => setCurrentPage('kiem-ke')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-green-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
                     <div className="flex-shrink-0 bg-green-100 text-green-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-green-200">
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-green-600 transition-colors duration-300">Kiểm Kê Hàng Hóa</h2>
                 </div>
                 
-                 <div onClick={() => setCurrentPage('kiem-tra-ton-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-amber-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                 <div onClick={() => setCurrentPage('kiem-tra-ton-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-amber-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
                     <div className="flex-shrink-0 bg-amber-100 text-amber-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-amber-200">
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-amber-600 transition-colors duration-300">Kiểm Tra Tồn Kho</h2>
                 </div>
 
-                <div onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-cyan-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                <div onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-cyan-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
                     <div className="flex-shrink-0 bg-cyan-100 text-cyan-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-cyan-200">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-cyan-600 transition-colors duration-300">Kiểm Hàng Chuyển Kho</h2>
                 </div>
                 
-                <div onClick={() => setCurrentPage('thay-posm')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-purple-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center flex-1">
+                <div onClick={() => setCurrentPage('thay-posm')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-purple-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
                     <div className="flex-shrink-0 bg-purple-100 text-purple-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-purple-200">
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -2161,77 +2179,26 @@ export const App: React.FC = () => {
                 <div className="text-center mb-12">
                     <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900">Thông Tin Ứng Dụng</h1>
                     <p className="mt-4 text-lg text-slate-600 max-w-3xl mx-auto">
-                        Công cụ hỗ trợ toàn diện giúp tối ưu hóa và đơn giản hóa các nghiệp vụ hàng ngày. Dưới đây là lịch sử các phiên bản cập nhật.
+                        Công cụ hỗ trợ toàn diện giúp tối ưu hóa và đơn giản hóa các nghiệp vụ hàng ngày.
                     </p>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
                     <div className="lg:col-span-2 bg-white p-8 rounded-xl shadow-lg border border-slate-200/80">
                         <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-3">
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                            Lịch sử cập nhật
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            Phiên bản hiện tại
                         </h2>
-                        <div className="space-y-8">
+                        <div>
                              <div>
                                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                                     <span className="bg-indigo-600 text-white font-bold text-sm px-3 py-1 rounded-full">v1.4.0</span>
                                     <h3 className="text-lg font-semibold text-slate-800">Tối ưu & Đồng bộ hóa</h3>
-                                    <span className="text-sm text-slate-500">22/07/2024</span>
                                 </div>
                                 <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
                                     <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Đồng bộ hóa giao diện và văn bản của thanh "Nhập từ Excel" trên toàn bộ ứng dụng.</li>
                                     <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Tối ưu hóa bố cục và font chữ trong chức năng in POSM (khổ A6) để đảm bảo không bị mất thông tin.</li>
                                      <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-red-100 text-red-800">[SỬA LỖI]</span>Rút gọn nội dung khuyến mãi quá dài và tinh chỉnh lại toàn bộ phần diễn giải, hướng dẫn trong các chức năng.</li>
-                                </ul>
-                            </div>
-                            
-                            <div>
-                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                                    <span className="bg-slate-500 text-white font-bold text-sm px-3 py-1 rounded-full">v1.3.0</span>
-                                    <h3 className="text-lg font-semibold text-slate-800">Giao diện mới & In POSM</h3>
-                                    <span className="text-sm text-slate-500">20/07/2024</span>
-                                </div>
-                                <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[MỚI]</span>Thêm chức năng "Thay POSM" để tự động tạo và in bảng giá khuyến mãi từ file Excel.</li>
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Tối ưu hóa giao diện trang chủ, sắp xếp các chức năng gọn gàng trên một hàng ngang.</li>
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Làm mới trang thông tin, bổ sung chi tiết lịch sử cập nhật phiên bản.</li>
-                                </ul>
-                            </div>
-
-                             <div>
-                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                                    <span className="bg-slate-500 text-white font-bold text-sm px-3 py-1 rounded-full">v1.2.0</span>
-                                    <h3 className="text-lg font-semibold text-slate-800">Kiểm Hàng Chuyển Kho</h3>
-                                    <span className="text-sm text-slate-500">10/07/2024</span>
-                                </div>
-                                <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[MỚI]</span>Thêm chức năng "Kiểm Hàng Chuyển Kho" sử dụng máy quét mã vạch để đối soát nhanh.</li>
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Tăng tốc độ đọc và xử lý file Excel ở tất cả các chức năng.</li>
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-red-100 text-red-800">[SỬA LỖI]</span>Khắc phục lỗi không nhận diện được mã sản phẩm/IMEI có chứa ký tự đặc biệt.</li>
-                                </ul>
-                            </div>
-                            
-                            <div>
-                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                                    <span className="bg-slate-500 text-white font-bold text-sm px-3 py-1 rounded-full">v1.1.0</span>
-                                    <h3 className="text-lg font-semibold text-slate-800">Tra Cứu Tồn Kho & Xuất File</h3>
-                                    <span className="text-sm text-slate-500">25/06/2024</span>
-                                </div>
-                                <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[MỚI]</span>Thêm chức năng "Kiểm Tra Tồn Kho" để tìm kiếm thông tin sản phẩm tức thì.</li>
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Trong "Kiểm Kê", trang tự động cuộn đến sản phẩm chưa kiểm tiếp theo để tăng tốc độ làm việc.</li>
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Cho phép xuất file Excel danh sách các sản phẩm chưa được kiểm trong chức năng "Kiểm Kê".</li>
-                                </ul>
-                            </div>
-
-                             <div>
-                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                                    <span className="bg-slate-500 text-white font-bold text-sm px-3 py-1 rounded-full">v1.0.0</span>
-                                    <h3 className="text-lg font-semibold text-slate-800">Ra Mắt Ứng Dụng</h3>
-                                    <span className="text-sm text-slate-500">15/06/2024</span>
-                                </div>
-                                <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-slate-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[MỚI]</span>Ra mắt phiên bản đầu tiên với hai chức năng cốt lõi: "Kiểm Quỹ Thu Ngân" và "Kiểm Kê Hàng Hóa".</li>
                                 </ul>
                             </div>
                         </div>
@@ -2245,33 +2212,24 @@ export const App: React.FC = () => {
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                                     </svg>
                                 </div>
-                                <h2 className="text-xl font-bold text-slate-800">Mục Đích & Tính Năng</h2>
+                                <h2 className="text-xl font-bold text-slate-800">Tính năng nổi bật</h2>
                             </div>
-                            <p className="text-sm text-slate-600">Cung cấp bộ công cụ toàn diện để đơn giản hóa nghiệp vụ hàng ngày, từ quản lý tài chính đến kiểm kê hàng hóa, giúp tiết kiệm thời gian và tăng độ chính xác.</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200/80">
-                            <div className="flex items-center gap-4 mb-4">
-                                 <div className="flex-shrink-0 bg-indigo-100 text-indigo-600 rounded-full p-2.5 inline-flex">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                                    </svg>
-                                </div>
-                                <h2 className="text-xl font-bold text-slate-800">Nền Tảng Công Nghệ</h2>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                <span className="bg-sky-100 text-sky-800 text-sm font-semibold px-2.5 py-1 rounded-full">React</span>
-                                <span className="bg-blue-100 text-blue-800 text-sm font-semibold px-2.5 py-1 rounded-full">TypeScript</span>
-                                <span className="bg-indigo-100 text-indigo-800 text-sm font-semibold px-2.5 py-1 rounded-full">Tailwind CSS</span>
-                            </div>
+                            <ul className="space-y-2 text-sm text-slate-600 list-disc list-inside">
+                                <li>Kiểm quỹ thu ngân nhanh chóng và chính xác.</li>
+                                <li>Kiểm kê hàng hóa từ file Excel, có tạo mã QR.</li>
+                                <li>Tra cứu tồn kho tức thì bằng máy quét hoặc tên.</li>
+                                <li>Đối soát hàng chuyển kho hiệu quả.</li>
+                                <li>Tự động tạo và in bảng giá (POSM) chuyên nghiệp.</li>
+                            </ul>
                         </div>
                         <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200/80">
                             <div className="flex items-center gap-4 mb-4">
                                 <div className="flex-shrink-0 bg-indigo-100 text-indigo-600 rounded-full p-2.5 inline-flex">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0012 11z" clipRule="evenodd" />
                                     </svg>
                                 </div>
-                                <h2 className="text-xl font-bold text-slate-800">Thông Tin Tác Giả</h2>
+                                <h2 className="text-xl font-bold text-slate-800">Người phát triển</h2>
                             </div>
                              <p className="text-slate-600 text-sm">
                                 Ứng dụng được thiết kế và phát triển bởi <strong className="text-slate-700">51118 - Đào Thế Anh</strong>.
@@ -2290,12 +2248,12 @@ export const App: React.FC = () => {
     <div className="min-h-screen font-sans flex flex-col">
        <header className="bg-white/80 backdrop-blur-sm shadow-sm sticky top-0 z-40 border-b border-slate-200/80">
             <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex justify-start items-center h-16 space-x-6">
+                <div className="flex flex-wrap justify-start items-center h-auto sm:h-16 py-2 sm:py-0 space-x-2 sm:space-x-6">
                     <button onClick={() => setCurrentPage('trang-chu')} className={navItemClasses('trang-chu')}>
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 22V12h6v10" /></svg>
                         <span>Trang chủ</span>
                     </button>
-                     <div className="h-6 w-px bg-slate-200"></div>
+                     <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
                      <button onClick={() => setCurrentPage('kiem-quy')} className={navItemClasses('kiem-quy')}>
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                         <span>Kiểm quỹ</span>
@@ -2320,13 +2278,15 @@ export const App: React.FC = () => {
                     </button>
                     <div className="flex-grow"></div>
                      <button onClick={() => setCurrentPage('thong-tin')} className={navItemClasses('thong-tin')}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
                         <span>Thông tin</span>
                     </button>
                 </div>
             </nav>
         </header>
-      <main className="w-full text-slate-800 flex flex-grow flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
+      <main className="w-full text-slate-800 flex flex-grow flex-col items-center p-4 sm:p-6 lg:p-8">
         {renderContent()}
       </main>
     </div>
