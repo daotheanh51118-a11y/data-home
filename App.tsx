@@ -1,5 +1,4 @@
 
-
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 
 // --- Type Declarations ---
@@ -122,8 +121,12 @@ const parseProductNameForPosm = (name: string): string => {
 };
 
 const getCategoryFromProductName = (name: string): string => {
-    const lowerName = name.toLowerCase();
-    if (lowerName.includes('tivi') || lowerName.includes('ti vi') || /\btv\b/.test(lowerName)) return 'tivi';
+    if (!name || typeof name !== 'string') return 'default';
+    const lowerName = name.toLowerCase().trim();
+    if (lowerName === '') return 'default';
+
+    // Prioritize prefixes like 'TV', 'Tivi', but also catch whole word 'TV' elsewhere.
+    if (/^(tivi|ti vi|tv)/.test(lowerName) || /\btv\b/.test(lowerName)) return 'tivi';
     if (lowerName.includes('tủ lạnh')) return 'tủ lạnh';
     if (lowerName.includes('máy giặt')) return 'máy giặt';
     if (lowerName.includes('máy lạnh') || lowerName.includes('điều hòa')) return 'máy lạnh';
@@ -131,28 +134,21 @@ const getCategoryFromProductName = (name: string): string => {
     return 'default';
 };
 
-const getIconSvg = (category: string, className: string = "") => {
+const getCategoryIconName = (category: string): string => {
     const lowerCategory = category.toLowerCase();
-    if (lowerCategory.includes('tivi') || lowerCategory.includes('ti vi') || /\btv\b/.test(lowerCategory)) {
-        return `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="${className}"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25A2.25 2.25 0 0 1 5.25 3h13.5A2.25 2.25 0 0 1 21 5.25Z" /></svg>`;
-    }
-    if (lowerCategory.includes('tủ lạnh')) {
-        return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M5 10h14" /><path d="M9 6v2" /><path d="M9 14v2" /></svg>`;
-    }
-    if (lowerCategory.includes('máy giặt')) {
-        return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><circle cx="12" cy="14" r="4" /><path d="M8 6h.01" /><path d="M11 6h.01" /><path d="M14 6h.01" /></svg>`;
-    }
-    if (lowerCategory.includes('máy lạnh') || lowerCategory.includes('điều hòa')) {
-        return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h18a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-18a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1z" /><path d="M7 16h4" /><path d="M14 16h3" /></svg>`;
-    }
-     if (lowerCategory.includes('điện thoại')) {
-        return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>`;
-    }
-    if (lowerCategory.includes('gift')) {
-         return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1" /><line x1="12" y1="8" x2="12" y2="21" /><path d="M19 12v7a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-7" /><path d="M7.5 8a2.5 2.5 0 0 1 0 -5a4.8 8 0 0 1 4.5 5a4.8 8 0 0 1 4.5 -5a2.5 2.5 0 0 1 0 5" /></svg>`;
-    }
-    // Default Icon
-    return `<svg xmlns="http://www.w3.org/2000/svg" class="${className}" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>`;
+    if (lowerCategory.includes('tivi') || lowerCategory.includes('ti vi') || /\btv\b/.test(lowerCategory)) return 'tv';
+    if (lowerCategory.includes('tủ lạnh')) return 'kitchen';
+    if (lowerCategory.includes('máy giặt')) return 'local_laundry_service';
+    if (lowerCategory.includes('máy lạnh') || lowerCategory.includes('điều hòa')) return 'ac_unit';
+    if (lowerCategory.includes('điện thoại')) return 'smartphone';
+    if (lowerCategory.includes('gift')) return 'card_giftcard';
+    return 'inventory_2'; // Default
+};
+
+const getIconSvg = (category: string, className: string = "") => {
+    const iconName = getCategoryIconName(category);
+    // Using `vertical-align: middle` to better align font icons with text.
+    return `<span class="material-symbols-outlined ${className}" style="vertical-align: middle;">${iconName}</span>`;
 };
 
 
@@ -178,30 +174,9 @@ const QRCodeComponent: React.FC<{ text: string, size?: number }> = ({ text, size
     return <canvas ref={canvasRef} style={{ width: `${size}px`, height: `${size}px` }} />;
 };
 
-const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ category, className="h-4 w-4" }) => {
-    const lowerCategory = category.toLowerCase();
-    
-    if (lowerCategory.includes('tivi') || lowerCategory.includes('ti vi') || /\btv\b/.test(lowerCategory)) {
-        return (
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className={className}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25A2.25 2.25 0 0 1 5.25 3h13.5A2.25 2.25 0 0 1 21 5.25Z" />
-            </svg>
-        );
-    }
-    if (lowerCategory.includes('tủ lạnh')) {
-        return <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M5 10h14" /><path d="M9 6v2" /><path d="M9 14v2" /></svg>;
-    }
-    if (lowerCategory.includes('máy giặt')) {
-        return <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="2" /><circle cx="12" cy="14" r="4" /><path d="M8 6h.01" /><path d="M11 6h.01" /><path d="M14 6h.01" /></svg>;
-    }
-    if (lowerCategory.includes('máy lạnh') || lowerCategory.includes('điều hòa')) {
-        return <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h18a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-18a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1z" /><path d="M7 16h4" /><path d="M14 16h3" /></svg>;
-    }
-    if (lowerCategory.includes('điện thoại')) {
-        return <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>;
-    }
-    // Default Icon
-    return <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
+const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ category, className = "text-base" }) => {
+    const iconName = getCategoryIconName(category);
+    return <span className={`material-symbols-outlined ${className}`}>{iconName}</span>;
 };
 
 // --- Main App Component ---
@@ -471,8 +446,13 @@ export const App: React.FC = () => {
             const productName = findValue(row, ['Tên sản phẩm']);
             const quantity = findValue(row, ['Số lượng']);
             const status = findValue(row, ['trạng thái sản phẩm']);
-            const category = findValue(row, ['Ngành hàng']);
+            const originalCategory = findValue(row, ['Ngành hàng']);
             const priceString = String(findValue(row, ['Giá bán', 'Giá']) || '0');
+
+            const derivedCategory = getCategoryFromProductName(String(productName || ''));
+            const finalCategory = derivedCategory !== 'default' 
+                ? derivedCategory 
+                : String(originalCategory || 'N/A');
 
             let rawQrCodeValue = String(imei || productCode || '').trim();
             if (rawQrCodeValue.startsWith("'")) {
@@ -493,7 +473,7 @@ export const App: React.FC = () => {
                 checked: false,
                 hasImei: !!imei,
                 status: String(status || 'N/A'),
-                category: String(category || 'N/A'),
+                category: finalCategory,
             };
         });
 
@@ -720,7 +700,11 @@ export const App: React.FC = () => {
                         imei = imei.substring(1);
                     }
                 }
-                const category = findValue(row, ['Ngành hàng']);
+                const originalCategory = findValue(row, ['Ngành hàng']);
+                const derivedCategory = getCategoryFromProductName(String(productName || ''));
+                const finalCategory = derivedCategory !== 'default'
+                    ? derivedCategory
+                    : String(originalCategory || 'N/A');
               
                 return {
                     productCode: productCode,
@@ -728,7 +712,7 @@ export const App: React.FC = () => {
                     fileQuantity: Number(String(quantity || 0).replace(/,/g, '')),
                     actualQuantity: null,
                     imei: imei ? imei : undefined,
-                    category: String(category || 'N/A'),
+                    category: finalCategory,
                 };
             });
             setExcelCheckItems(loadedItems);
@@ -1140,6 +1124,7 @@ export const App: React.FC = () => {
     const cssStyles = `
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0');
             body { 
                 margin: 0; 
                 font-family: 'Inter', sans-serif;
@@ -1152,6 +1137,14 @@ export const App: React.FC = () => {
                 flex-direction: column;
                 align-items: center;
                 overflow: hidden;
+            }
+            
+            .material-symbols-outlined {
+                font-variation-settings: 'FILL' 0, 'wght' 600, 'GRAD' 0, 'opsz' 48;
+                line-height: 1;
+                vertical-align: middle;
+                font-feature-settings: 'liga';
+                -webkit-font-smoothing: antialiased;
             }
             
             ${formatSpecificStyles}
@@ -1192,10 +1185,10 @@ export const App: React.FC = () => {
                 gap: 8px;
             }
             .category-icon {
-                width: 1.2em;
-                height: 1.2em;
-                flex-shrink: 0;
-                color: #333;
+                 font-size: 1.2em;
+                 display: inline-block;
+                 flex-shrink: 0;
+                 color: #333;
             }
             .product-name {
                  font-size: 1.6em;
@@ -1231,8 +1224,8 @@ export const App: React.FC = () => {
                 text-overflow: ellipsis;
             }
             .gift-icon {
-                width: 1.1em;
-                height: 1.1em;
+                font-size: 1.1em;
+                display: inline-block;
                 flex-shrink: 0;
                 color: #4b5563;
             }
@@ -1272,8 +1265,7 @@ export const App: React.FC = () => {
                 gap: 15px;
             }
             .promotion-block.promotion-only .gift-icon {
-                width: 1em;
-                height: 1em;
+                font-size: 1em;
             }
             .price-block {
                 margin-bottom: 0.5em;
@@ -1515,7 +1507,7 @@ export const App: React.FC = () => {
                     </div>
                 </div>
             )}
-            <div className="w-full max-w-7xl">
+            <div className="w-full max-w-7xl mx-auto">
               <header className="text-center mb-8">
                   <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">KIỂM QUỸ THU NGÂN</h1>
                   <div className="mt-4 flex flex-wrap justify-center items-center gap-3">
@@ -1587,7 +1579,7 @@ export const App: React.FC = () => {
         );
       case 'kiem-ke':
         return (
-          <div className="w-full max-w-7xl">
+          <div className="w-full max-w-7xl mx-auto">
             <header className="text-center mb-8">
                 <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">KIỂM KÊ HÀNG HÓA</h1>
                 <div className="mt-4 w-full max-w-lg mx-auto">
@@ -1727,7 +1719,7 @@ export const App: React.FC = () => {
                         </td>
                         <td className={`px-6 py-4 font-medium text-slate-900 text-lg ${infoClasses}`}>
                            <div className="flex items-center gap-3">
-                                <CategoryIcon category={item.category} className="h-5 w-5 text-slate-500 flex-shrink-0" />
+                                <CategoryIcon category={item.category} className="text-xl text-slate-500 flex-shrink-0" />
                                 <span>{item.productName}</span>
                             </div>
                         </td>
@@ -1836,7 +1828,7 @@ export const App: React.FC = () => {
                               {item.result ? (
                                 <div className="space-y-4">
                                     <h3 className="text-xl font-bold text-slate-900 flex items-center gap-3">
-                                        <CategoryIcon category={item.result.category} className="h-6 w-6 text-slate-700" />
+                                        <CategoryIcon category={item.result.category} className="text-2xl text-slate-700" />
                                         <span>{item.result.productName}</span>
                                     </h3>
                                     <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -1899,7 +1891,7 @@ export const App: React.FC = () => {
         );
        case 'kiem-hang-chuyen-kho':
             return (
-                <div className="w-full max-w-7xl">
+                <div className="w-full max-w-7xl mx-auto">
                     <header className="text-center mb-8">
                         <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">KIỂM HÀNG CHUYỂN KHO</h1>
                         <div className="mt-6 w-full max-w-lg mx-auto">
@@ -1994,7 +1986,7 @@ export const App: React.FC = () => {
                                                 <tr key={index} id={`excel-check-item-tr-${index}`} className={`${rowColor} border-b transition-all duration-500 ${isLastScanned ? 'ring-2 ring-indigo-500 ring-offset-2' : ''}`}>
                                                     <td className="px-6 py-4 font-medium text-slate-900">
                                                         <div className="flex items-center gap-3">
-                                                          <CategoryIcon category={item.category} className="h-5 w-5 text-slate-500 flex-shrink-0" />
+                                                          <CategoryIcon category={item.category} className="text-xl text-slate-500 flex-shrink-0" />
                                                           <div>
                                                               {item.productName}
                                                               <br/>
@@ -2078,7 +2070,7 @@ export const App: React.FC = () => {
             );
       case 'thay-posm':
         return (
-          <div className="w-full max-w-7xl">
+          <div className="w-full max-w-[900px] mx-auto">
             <header className="text-center mb-8">
                 <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">THAY ĐỔI BẢNG GIÁ (POSM)</h1>
                 <div className="mt-6 w-full max-w-3xl mx-auto">
@@ -2183,8 +2175,8 @@ export const App: React.FC = () => {
                     </p>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                    <div className="lg:col-span-2 bg-white p-8 rounded-xl shadow-lg border border-slate-200/80">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                    <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg border border-slate-200/80">
                         <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-3">
                            <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                             Phiên bản hiện tại
@@ -2195,7 +2187,7 @@ export const App: React.FC = () => {
                                     <span className="bg-indigo-600 text-white font-bold text-sm px-3 py-1 rounded-full">v1.4.0</span>
                                     <h3 className="text-lg font-semibold text-slate-800">Tối ưu & Đồng bộ hóa</h3>
                                 </div>
-                                <ul className="mt-4 ml-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
+                                <ul className="mt-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
                                     <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Đồng bộ hóa giao diện và văn bản của thanh "Nhập từ Excel" trên toàn bộ ứng dụng.</li>
                                     <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Tối ưu hóa bố cục và font chữ trong chức năng in POSM (khổ A6) để đảm bảo không bị mất thông tin.</li>
                                      <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-red-100 text-red-800">[SỬA LỖI]</span>Rút gọn nội dung khuyến mãi quá dài và tinh chỉnh lại toàn bộ phần diễn giải, hướng dẫn trong các chức năng.</li>
@@ -2204,7 +2196,7 @@ export const App: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="space-y-8">
+                    <div className="space-y-6">
                         <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200/80">
                             <div className="flex items-center gap-4 mb-4">
                                 <div className="flex-shrink-0 bg-indigo-100 text-indigo-600 rounded-full p-2.5 inline-flex">
