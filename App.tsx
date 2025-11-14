@@ -2448,7 +2448,7 @@ export const App: React.FC = () => {
           <div className="w-full max-w-5xl min-h-[600px] bg-white rounded-2xl shadow-xl flex flex-col md:flex-row overflow-hidden">
               {/* Left Branding Panel */}
               <div className="w-full md:w-2/5 bg-[#1F75F0] text-white p-8 sm:p-12 flex flex-col justify-center items-center text-center">
-                  <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cGF0aCBmaWxsPSd3aGl0ZScgZD0nTTUwIDUgYSA0NSA0NSAwIDEgMSAwIDkwIGEgNDUgNDUgMCAxIDEgMCAtOTAgTTUwIDE1IGEgMzUgMzUgMCAxIDAgMCA3MCBhIDM1IDM1IDAgMSAwIDAgLTcwJyAvPjxwYXRoIGZpbGw9J3doaXRlJyBkPSdNMzUgMzUgaCAzMCB2IDMwIGggLTMwIHogJyB0cmFuc2Zvcm09J3JvdGF0ZSg0NSA1MCA1MCknIC8+PC9zdmc+" alt="Brand Logo" className="w-24 h-24 opacity-90 mb-6" />
+                  <img src="https://images.urbox.vn/_img_server/2025/03/19/320/1742374793_67da878a0f466.png" alt="Brand Logo" className="w-40 h-40 opacity-90 mb-6" />
                   <div className="flex items-center justify-center gap-3 mb-4">
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
