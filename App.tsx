@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 
 // --- Type Declarations ---
@@ -215,6 +216,8 @@ const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ cate
 };
 
 // --- Main App Component ---
+const SESSION_TIMEOUT_MS = 48 * 60 * 60 * 1000; // 48 hours
+
 export const App: React.FC = () => {
   // --- State for Authentication ---
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -279,21 +282,48 @@ export const App: React.FC = () => {
   // Static data
   const vietQRString = '00020101021138530010A00000072701230006970407010903111993953037045802VN63042731';
   const adminPages: Page[] = ['kiem-tra-ton-kho', 'kiem-hang-chuyen-kho', 'thay-posm'];
+  const isAdmin = currentUser?.role === 'admin';
 
-  // --- Authentication Logic ---
+  // --- Authentication & Session Logic ---
+  const handleLogout = () => {
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+      setIsUserMenuOpen(false);
+      localStorage.removeItem('currentUser');
+      localStorage.removeItem('lastActivity');
+      setCurrentPage('trang-chu');
+  };
+
   useEffect(() => {
+    // Restore session on app load
+    try {
+        const savedUserJson = localStorage.getItem('currentUser');
+        const lastActivityTime = localStorage.getItem('lastActivity');
+        if (savedUserJson && lastActivityTime) {
+            const user: User = JSON.parse(savedUserJson);
+            const isSessionActive = new Date().getTime() - parseInt(lastActivityTime, 10) < SESSION_TIMEOUT_MS;
+            if (user.role === 'admin' || isSessionActive) {
+                setCurrentUser(user);
+                setIsAuthenticated(true);
+            } else {
+                localStorage.removeItem('currentUser');
+                localStorage.removeItem('lastActivity');
+            }
+        }
+    } catch (error) {
+        console.error("Failed to restore session:", error);
+        localStorage.removeItem('currentUser');
+        localStorage.removeItem('lastActivity');
+    }
+
+    // Load users list from storage
     try {
         const savedUsers = localStorage.getItem('app_users');
         if (savedUsers) {
-            const parsedUsers: User[] = JSON.parse(savedUsers).map((u: any) => ({
-                ...u,
-                role: u.role || 'user'
-            }));
+            const parsedUsers: User[] = JSON.parse(savedUsers).map((u: any) => ({ ...u, role: u.role || 'user' }));
             setUsers(parsedUsers);
         } else {
-            const defaultUsers: User[] = [
-                { username: 'admin', password: '0311', role: 'admin' },
-            ];
+            const defaultUsers: User[] = [{ username: 'admin', password: '0311', role: 'admin' }];
             setUsers(defaultUsers);
             localStorage.setItem('app_users', JSON.stringify(defaultUsers));
         }
@@ -301,6 +331,35 @@ export const App: React.FC = () => {
         console.error("Failed to load users from localStorage:", error);
     }
   }, []);
+
+  useEffect(() => {
+    // Manage session activity and timeout for authenticated users
+    if (!isAuthenticated || !currentUser) return;
+    if (currentUser.role === 'admin') return; // No timeout for admin
+
+    const updateLastActivity = () => {
+        localStorage.setItem('lastActivity', new Date().getTime().toString());
+    };
+
+    updateLastActivity();
+    const activityEvents: (keyof WindowEventMap)[] = ['mousemove', 'keydown', 'click', 'scroll'];
+    activityEvents.forEach(event => window.addEventListener(event, updateLastActivity, { passive: true }));
+
+    const intervalId = setInterval(() => {
+        const lastActivityTime = localStorage.getItem('lastActivity');
+        if (lastActivityTime) {
+            if (new Date().getTime() - parseInt(lastActivityTime, 10) > SESSION_TIMEOUT_MS) {
+                alert('Phiên đăng nhập đã hết hạn do không hoạt động. Vui lòng đăng nhập lại.');
+                handleLogout();
+            }
+        }
+    }, 60 * 1000); // Check every minute
+
+    return () => {
+        clearInterval(intervalId);
+        activityEvents.forEach(event => window.removeEventListener(event, updateLastActivity));
+    };
+  }, [isAuthenticated, currentUser]);
 
   useEffect(() => {
     // Role-based page access control
@@ -328,6 +387,8 @@ export const App: React.FC = () => {
     if (user) {
         setIsAuthenticated(true);
         setCurrentUser(user);
+        localStorage.setItem('currentUser', JSON.stringify(user));
+        localStorage.setItem('lastActivity', new Date().getTime().toString());
         setLoginError('');
         setUsername('');
         setPassword('');
@@ -365,11 +426,12 @@ export const App: React.FC = () => {
     setAuthView('login');
   };
 
-  const handleLogout = () => {
-      setIsAuthenticated(false);
-      setCurrentUser(null);
-      setIsUserMenuOpen(false);
-      setCurrentPage('trang-chu'); // Reset to home page on logout
+  const handleAdminFeatureClick = (page: Page) => {
+    if (isAdmin) {
+      setCurrentPage(page);
+    } else {
+      alert('Chức năng này bị hạn chế. Vui lòng liên hệ quản trị viên để được cấp quyền truy cập.');
+    }
   };
   
   useEffect(() => {
@@ -1566,6 +1628,8 @@ export const App: React.FC = () => {
     }`;
     
   const renderContent = () => {
+    const adminCardClasses = !isAdmin ? 'opacity-50 grayscale cursor-not-allowed hover:!shadow-sm hover:!translate-y-0' : 'hover:border-amber-500 hover:shadow-xl hover:-translate-y-1';
+    
     switch (currentPage) {
       case 'trang-chu':
         return (
@@ -1587,32 +1651,28 @@ export const App: React.FC = () => {
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-green-600 transition-colors duration-300">Kiểm Kê Hàng Hóa</h2>
                 </div>
                 
-                 {currentUser?.role === 'admin' && (
-                    <>
-                        <div onClick={() => setCurrentPage('kiem-tra-ton-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-amber-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
-                            <div className="flex-shrink-0 bg-amber-100 text-amber-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-amber-200">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                            </div>
-                            <h2 className="text-base font-bold text-slate-800 group-hover:text-amber-600 transition-colors duration-300">Kiểm Tra Tồn Kho</h2>
-                        </div>
+                <div onClick={() => handleAdminFeatureClick('kiem-tra-ton-kho')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${!isAdmin ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-amber-500 hover:shadow-xl hover:-translate-y-1'}`}>
+                    <div className="flex-shrink-0 bg-amber-100 text-amber-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-amber-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                    </div>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-amber-600 transition-colors duration-300">Kiểm Tra Tồn Kho</h2>
+                </div>
 
-                        <div onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-cyan-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
-                            <div className="flex-shrink-0 bg-cyan-100 text-cyan-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-cyan-200">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                            </div>
-                            <h2 className="text-base font-bold text-slate-800 group-hover:text-cyan-600 transition-colors duration-300">Kiểm Hàng Chuyển Kho</h2>
-                        </div>
-                        
-                        <div onClick={() => setCurrentPage('thay-posm')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-purple-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
-                            <div className="flex-shrink-0 bg-purple-100 text-purple-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-purple-200">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                            </div>
-                            <h2 className="text-base font-bold text-slate-800 group-hover:text-purple-600 transition-colors duration-300">Thay POSM</h2>
-                        </div>
-                    </>
-                 )}
+                <div onClick={() => handleAdminFeatureClick('kiem-hang-chuyen-kho')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${!isAdmin ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-cyan-500 hover:shadow-xl hover:-translate-y-1'}`}>
+                    <div className="flex-shrink-0 bg-cyan-100 text-cyan-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-cyan-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </div>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-cyan-600 transition-colors duration-300">Kiểm Hàng Chuyển Kho</h2>
+                </div>
+                
+                <div onClick={() => handleAdminFeatureClick('thay-posm')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${!isAdmin ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-purple-500 hover:shadow-xl hover:-translate-y-1'}`}>
+                    <div className="flex-shrink-0 bg-purple-100 text-purple-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-purple-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                    </div>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-purple-600 transition-colors duration-300">Thay POSM</h2>
+                </div>
              </div>
           </div>
         );
@@ -2478,24 +2538,21 @@ export const App: React.FC = () => {
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
                             <span>Kiểm kê</span>
                         </button>
-                        {currentUser?.role === 'admin' && (
-                            <>
-                                <button onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className={navItemClasses('kiem-hang-chuyen-kho')}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                    <span className="hidden sm:inline">Kiểm Hàng</span>
-                                </button>
-                                <button onClick={() => setCurrentPage('kiem-tra-ton-kho')} className={navItemClasses('kiem-tra-ton-kho')}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                                    <span className="hidden sm:inline">Tra tồn kho</span>
-                                </button>
-                                <button onClick={() => setCurrentPage('thay-posm')} className={navItemClasses('thay-posm')}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                    </svg>
-                                    <span className="hidden sm:inline">Thay POSM</span>
-                                </button>
-                            </>
-                        )}
+
+                        <button onClick={() => handleAdminFeatureClick('kiem-hang-chuyen-kho')} className={`${navItemClasses('kiem-hang-chuyen-kho')} ${!isAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <span className="hidden sm:inline">Kiểm Hàng</span>
+                        </button>
+                        <button onClick={() => handleAdminFeatureClick('kiem-tra-ton-kho')} className={`${navItemClasses('kiem-tra-ton-kho')} ${!isAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                            <span className="hidden sm:inline">Tra tồn kho</span>
+                        </button>
+                        <button onClick={() => handleAdminFeatureClick('thay-posm')} className={`${navItemClasses('thay-posm')} ${!isAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            <span className="hidden sm:inline">Thay POSM</span>
+                        </button>
                     </div>
 
                     <div ref={userMenuRef} className="relative">
