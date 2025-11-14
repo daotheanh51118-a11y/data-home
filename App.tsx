@@ -1,6 +1,3 @@
-
-
-
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 
 // --- Type Declarations ---
@@ -2447,74 +2444,110 @@ export const App: React.FC = () => {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen font-sans flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-sm">
-            <div className="text-center mb-8">
-                <div className="inline-block bg-indigo-100 text-indigo-600 rounded-full p-4 mb-4">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                </div>
-                <h1 className="text-3xl font-bold text-slate-800">{authView === 'login' ? 'Đăng Nhập' : 'Đăng Ký'}</h1>
-                <p className="text-slate-500 mt-2">
-                    {authView === 'login' ? 'Vui lòng đăng nhập để sử dụng ứng dụng.' : 'Tạo tài khoản mới để bắt đầu.'}
-                </p>
-            </div>
-            <div className="bg-white p-8 rounded-xl shadow-md border border-slate-200/80">
-                {authView === 'login' ? (
-                    <form onSubmit={handleLogin} className="space-y-6">
-                        <div>
-                            <label htmlFor="username" className="block text-sm font-medium text-slate-700">Tên đăng nhập</label>
-                            <div className="mt-1">
-                                <input id="username" name="username" type="text" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"/>
-                            </div>
-                        </div>
-                        <div>
-                            <label htmlFor="password"className="block text-sm font-medium text-slate-700">Mật khẩu</label>
-                            <div className="mt-1">
-                                <input id="password" name="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"/>
-                            </div>
-                        </div>
-                        {loginError && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-md border border-red-200 text-center">{loginError}</p>}
-                        {registerSuccess && <p className="text-sm text-green-600 bg-green-50 p-3 rounded-md border border-green-200 text-center">{registerSuccess}</p>}
-                        <div>
-                            <button type="submit" className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Đăng nhập</button>
-                        </div>
-                        <div className="text-center">
-                            <button type="button" onClick={() => { setAuthView('register'); setLoginError(''); }} className="text-sm font-medium text-indigo-600 hover:text-indigo-500">Chưa có tài khoản? Đăng ký</button>
-                        </div>
-                    </form>
-                ) : (
-                    <form onSubmit={handleRegister} className="space-y-4">
-                        <div>
-                            <label htmlFor="new-username" className="block text-sm font-medium text-slate-700">Tên đăng nhập</label>
-                            <div className="mt-1">
-                                <input id="new-username" name="new-username" type="text" required value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"/>
-                            </div>
-                        </div>
-                        <div>
-                            <label htmlFor="new-password"className="block text-sm font-medium text-slate-700">Mật khẩu</label>
-                            <div className="mt-1">
-                                <input id="new-password" name="new-password" type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"/>
-                            </div>
-                        </div>
-                         <div>
-                            <label htmlFor="confirm-password"className="block text-sm font-medium text-slate-700">Xác nhận Mật khẩu</label>
-                            <div className="mt-1">
-                                <input id="confirm-password" name="confirm-password" type="password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"/>
-                            </div>
-                        </div>
-                        {registerError && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-md border border-red-200 text-center">{registerError}</p>}
-                        <div className="pt-2">
-                            <button type="submit" className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Đăng ký</button>
-                        </div>
-                         <div className="text-center">
-                            <button type="button" onClick={() => { setAuthView('login'); setRegisterError(''); }} className="text-sm font-medium text-indigo-600 hover:text-indigo-500">Đã có tài khoản? Đăng nhập</button>
-                        </div>
-                    </form>
-                )}
-            </div>
-        </div>
+      <div className="min-h-screen font-sans bg-slate-100 flex items-center justify-center p-4">
+          <div className="w-full max-w-5xl min-h-[600px] bg-white rounded-2xl shadow-xl flex flex-col md:flex-row overflow-hidden">
+              {/* Left Branding Panel */}
+              <div className="w-full md:w-2/5 bg-[#1F75F0] text-white p-8 sm:p-12 flex flex-col justify-center items-center text-center">
+                  <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cGF0aCBmaWxsPSd3aGl0ZScgZD0nTTUwIDUgYSA0NSA0NSAwIDEgMSAwIDkwIGEgNDUgNDUgMCAxIDEgMCAtOTAgTTUwIDE1IGEgMzUgMzUgMCAxIDAgMCA3MCBhIDM1IDM1IDAgMSAwIDAgLTcwJyAvPjxwYXRoIGZpbGw9J3doaXRlJyBkPSdNMzUgMzUgaCAzMCB2IDMwIGggLTMwIHogJyB0cmFuc2Zvcm09J3JvdGF0ZSg0NSA1MCA1MCknIC8+PC9zdmc+" alt="Brand Logo" className="w-24 h-24 opacity-90 mb-6" />
+                  <div className="flex items-center justify-center gap-3 mb-4">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                      <span className="text-xl font-bold tracking-wider uppercase">HỖ TRỢ CÔNG VIỆC</span>
+                  </div>
+                  <h1 className="text-4xl font-extrabold mb-3">WELCOME!</h1>
+                  <p className="text-blue-100 text-lg max-w-xs">
+                      Nền tảng hỗ trợ các nghiệp vụ hàng ngày của bạn.
+                  </p>
+              </div>
+
+              {/* Right Form Panel */}
+              <div className="w-full md:w-3/5 p-8 sm:p-12 flex flex-col justify-center">
+                  <div className="w-full max-w-md mx-auto">
+                      <h2 className="text-3xl font-bold text-slate-800 mb-2">
+                          {authView === 'login' ? 'Đăng Nhập' : 'Tạo Tài Khoản'}
+                      </h2>
+                      <p className="text-slate-500 mb-8">
+                          {authView === 'login' ? 'Vui lòng nhập thông tin của bạn.' : 'Điền thông tin để đăng ký.'}
+                      </p>
+
+                      {authView === 'login' ? (
+                          <form onSubmit={handleLogin} className="space-y-5">
+                              <div>
+                                  <label htmlFor="username" className="block text-sm font-medium text-slate-700 mb-1">Tên đăng nhập</label>
+                                  <div className="relative">
+                                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+                                      </div>
+                                      <input id="username" name="username" type="text" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} className="appearance-none block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-[#1F75F0] focus:border-[#1F75F0] sm:text-sm"/>
+                                  </div>
+                              </div>
+                              <div>
+                                  <label htmlFor="password"className="block text-sm font-medium text-slate-700 mb-1">Mật khẩu</label>
+                                  <div className="relative">
+                                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+                                      </div>
+                                     <input id="password" name="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} className="appearance-none block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-[#1F75F0] focus:border-[#1F75F0] sm:text-sm"/>
+                                  </div>
+                              </div>
+                              
+                              {loginError && <p className="flex items-center gap-2 text-sm text-red-700 bg-red-100 p-3 rounded-md border border-red-200/50"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>{loginError}</p>}
+                              {registerSuccess && <p className="flex items-center gap-2 text-sm text-green-700 bg-green-100 p-3 rounded-md border border-green-200/50"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>{registerSuccess}</p>}
+
+                              <button type="submit" className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#1F75F0] hover:bg-[#1A63CC] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#1F75F0] transition-colors duration-300">Đăng nhập</button>
+                              
+                              <p className="text-center text-sm text-slate-600">
+                                 Chưa có tài khoản?{' '}
+                                  <button type="button" onClick={() => { setAuthView('register'); setLoginError(''); setRegisterSuccess(''); }} className="font-medium text-[#1F75F0] hover:text-[#1A63CC] focus:outline-none">
+                                      Đăng ký
+                                  </button>
+                              </p>
+                          </form>
+                      ) : (
+                          <form onSubmit={handleRegister} className="space-y-4">
+                              <div>
+                                  <label htmlFor="new-username" className="block text-sm font-medium text-slate-700 mb-1">Tên đăng nhập</label>
+                                  <div className="relative">
+                                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+                                      </div>
+                                      <input id="new-username" name="new-username" type="text" required value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="appearance-none block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-[#1F75F0] focus:border-[#1F75F0] sm:text-sm"/>
+                                  </div>
+                              </div>
+                               <div>
+                                  <label htmlFor="new-password"className="block text-sm font-medium text-slate-700 mb-1">Mật khẩu</label>
+                                   <div className="relative">
+                                       <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+                                       </div>
+                                      <input id="new-password" name="new-password" type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="appearance-none block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-[#1F75F0] focus:border-[#1F75F0] sm:text-sm"/>
+                                   </div>
+                              </div>
+                               <div>
+                                  <label htmlFor="confirm-password"className="block text-sm font-medium text-slate-700 mb-1">Xác nhận Mật khẩu</label>
+                                   <div className="relative">
+                                       <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" /><path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm9.707 5.707a1 1 0 00-1.414-1.414L9 12.586l-1.293-1.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                       </div>
+                                      <input id="confirm-password" name="confirm-password" type="password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="appearance-none block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-[#1F75F0] focus:border-[#1F75F0] sm:text-sm"/>
+                                   </div>
+                              </div>
+                              {registerError && <p className="flex items-center gap-2 text-sm text-red-700 bg-red-100 p-3 rounded-md border border-red-200/50"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>{registerError}</p>}
+                              
+                              <button type="submit" className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#1F75F0] hover:bg-[#1A63CC] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#1F75F0] transition-colors duration-300">Đăng ký</button>
+                              
+                               <p className="text-center text-sm text-slate-600">
+                                  Đã có tài khoản?{' '}
+                                  <button type="button" onClick={() => { setAuthView('login'); setRegisterError(''); }} className="font-medium text-[#1F75F0] hover:text-[#1A63CC] focus:outline-none">
+                                      Đăng nhập
+                                  </button>
+                              </p>
+                          </form>
+                      )}
+                  </div>
+              </div>
+          </div>
       </div>
     );
   }
