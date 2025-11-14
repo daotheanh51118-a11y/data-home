@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 
 // --- Type Declarations ---
@@ -10,6 +11,12 @@ declare global {
 }
 
 type Page = 'trang-chu' | 'kiem-quy' | 'kiem-tra-ton-kho' | 'kiem-ke' | 'thong-tin' | 'kiem-hang-chuyen-kho' | 'thay-posm';
+
+type User = {
+  username: string;
+  password: string;
+  role: 'admin' | 'user';
+};
 
 type InventoryItem = {
   qrCode: string; // The primary value for QR code generation (IMEI if present, else Product Code)
@@ -209,7 +216,25 @@ const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ cate
 
 // --- Main App Component ---
 export const App: React.FC = () => {
+  // --- State for Authentication ---
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [authView, setAuthView] = useState<'login' | 'register'>('login');
+  // Login form state
+  const [username, setUsername] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [loginError, setLoginError] = useState<string>('');
+  // Register form state
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [registerError, setRegisterError] = useState('');
+  const [registerSuccess, setRegisterSuccess] = useState('');
+  
   const [currentPage, setCurrentPage] = useState<Page>('trang-chu');
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   
   // State for Kiem Quy
   const [counts, setCounts] = useState<Record<number, number>>(
@@ -253,7 +278,99 @@ export const App: React.FC = () => {
 
   // Static data
   const vietQRString = '00020101021138530010A00000072701230006970407010903111993953037045802VN63042731';
+  const adminPages: Page[] = ['kiem-tra-ton-kho', 'kiem-hang-chuyen-kho', 'thay-posm'];
 
+  // --- Authentication Logic ---
+  useEffect(() => {
+    try {
+        const savedUsers = localStorage.getItem('app_users');
+        if (savedUsers) {
+            const parsedUsers: User[] = JSON.parse(savedUsers).map((u: any) => ({
+                ...u,
+                role: u.role || 'user'
+            }));
+            setUsers(parsedUsers);
+        } else {
+            const defaultUsers: User[] = [
+                { username: 'admin', password: '0311', role: 'admin' },
+            ];
+            setUsers(defaultUsers);
+            localStorage.setItem('app_users', JSON.stringify(defaultUsers));
+        }
+    } catch (error) {
+        console.error("Failed to load users from localStorage:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Role-based page access control
+    if (isAuthenticated && currentUser?.role === 'user' && adminPages.includes(currentPage)) {
+        setCurrentPage('trang-chu');
+    }
+  }, [currentPage, isAuthenticated, currentUser]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegisterSuccess(''); // Clear any registration success message
+    const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
+
+    if (user) {
+        setIsAuthenticated(true);
+        setCurrentUser(user);
+        setLoginError('');
+        setUsername('');
+        setPassword('');
+    } else {
+        setLoginError('Tên đăng nhập hoặc mật khẩu không chính xác.');
+    }
+  };
+
+  const handleRegister = (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegisterError('');
+    if (newPassword !== confirmPassword) {
+      setRegisterError('Mật khẩu xác nhận không khớp.');
+      return;
+    }
+    if (newPassword.length < 3) {
+      setRegisterError('Mật khẩu phải có ít nhất 3 ký tự.');
+      return;
+    }
+    if (users.some(u => u.username.toLowerCase() === newUsername.toLowerCase())) {
+      setRegisterError('Tên đăng nhập này đã tồn tại.');
+      return;
+    }
+    
+    const newUser: User = { username: newUsername, password: newPassword, role: 'user' };
+    const updatedUsers = [...users, newUser];
+    setUsers(updatedUsers);
+    localStorage.setItem('app_users', JSON.stringify(updatedUsers));
+
+    setNewUsername('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setRegisterError('');
+    setRegisterSuccess('Đăng ký thành công! Vui lòng đăng nhập.');
+    setAuthView('login');
+  };
+
+  const handleLogout = () => {
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+      setIsUserMenuOpen(false);
+      setCurrentPage('trang-chu'); // Reset to home page on logout
+  };
   
   useEffect(() => {
     try {
@@ -1470,28 +1587,32 @@ export const App: React.FC = () => {
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-green-600 transition-colors duration-300">Kiểm Kê Hàng Hóa</h2>
                 </div>
                 
-                 <div onClick={() => setCurrentPage('kiem-tra-ton-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-amber-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
-                    <div className="flex-shrink-0 bg-amber-100 text-amber-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-amber-200">
-                       <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                    </div>
-                    <h2 className="text-base font-bold text-slate-800 group-hover:text-amber-600 transition-colors duration-300">Kiểm Tra Tồn Kho</h2>
-                </div>
+                 {currentUser?.role === 'admin' && (
+                    <>
+                        <div onClick={() => setCurrentPage('kiem-tra-ton-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-amber-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
+                            <div className="flex-shrink-0 bg-amber-100 text-amber-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-amber-200">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                            </div>
+                            <h2 className="text-base font-bold text-slate-800 group-hover:text-amber-600 transition-colors duration-300">Kiểm Tra Tồn Kho</h2>
+                        </div>
 
-                <div onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-cyan-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
-                    <div className="flex-shrink-0 bg-cyan-100 text-cyan-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-cyan-200">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    </div>
-                    <h2 className="text-base font-bold text-slate-800 group-hover:text-cyan-600 transition-colors duration-300">Kiểm Hàng Chuyển Kho</h2>
-                </div>
-                
-                <div onClick={() => setCurrentPage('thay-posm')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-purple-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
-                    <div className="flex-shrink-0 bg-purple-100 text-purple-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-purple-200">
-                       <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                           <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                    </div>
-                    <h2 className="text-base font-bold text-slate-800 group-hover:text-purple-600 transition-colors duration-300">Thay POSM</h2>
-                </div>
+                        <div onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-cyan-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
+                            <div className="flex-shrink-0 bg-cyan-100 text-cyan-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-cyan-200">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            </div>
+                            <h2 className="text-base font-bold text-slate-800 group-hover:text-cyan-600 transition-colors duration-300">Kiểm Hàng Chuyển Kho</h2>
+                        </div>
+                        
+                        <div onClick={() => setCurrentPage('thay-posm')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-purple-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
+                            <div className="flex-shrink-0 bg-purple-100 text-purple-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-purple-200">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                            </div>
+                            <h2 className="text-base font-bold text-slate-800 group-hover:text-purple-600 transition-colors duration-300">Thay POSM</h2>
+                        </div>
+                    </>
+                 )}
              </div>
           </div>
         );
@@ -2264,45 +2385,152 @@ export const App: React.FC = () => {
     }
   };
 
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen font-sans flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+            <div className="text-center mb-8">
+                <div className="inline-block bg-indigo-100 text-indigo-600 rounded-full p-4 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                </div>
+                <h1 className="text-3xl font-bold text-slate-800">{authView === 'login' ? 'Đăng Nhập' : 'Đăng Ký'}</h1>
+                <p className="text-slate-500 mt-2">
+                    {authView === 'login' ? 'Vui lòng đăng nhập để sử dụng ứng dụng.' : 'Tạo tài khoản mới để bắt đầu.'}
+                </p>
+            </div>
+            <div className="bg-white p-8 rounded-xl shadow-md border border-slate-200/80">
+                {authView === 'login' ? (
+                    <form onSubmit={handleLogin} className="space-y-6">
+                        <div>
+                            <label htmlFor="username" className="block text-sm font-medium text-slate-700">Tên đăng nhập</label>
+                            <div className="mt-1">
+                                <input id="username" name="username" type="text" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"/>
+                            </div>
+                        </div>
+                        <div>
+                            <label htmlFor="password"className="block text-sm font-medium text-slate-700">Mật khẩu</label>
+                            <div className="mt-1">
+                                <input id="password" name="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"/>
+                            </div>
+                        </div>
+                        {loginError && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-md border border-red-200 text-center">{loginError}</p>}
+                        {registerSuccess && <p className="text-sm text-green-600 bg-green-50 p-3 rounded-md border border-green-200 text-center">{registerSuccess}</p>}
+                        <div>
+                            <button type="submit" className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Đăng nhập</button>
+                        </div>
+                        <div className="text-center">
+                            <button type="button" onClick={() => { setAuthView('register'); setLoginError(''); }} className="text-sm font-medium text-indigo-600 hover:text-indigo-500">Chưa có tài khoản? Đăng ký</button>
+                        </div>
+                    </form>
+                ) : (
+                    <form onSubmit={handleRegister} className="space-y-4">
+                        <div>
+                            <label htmlFor="new-username" className="block text-sm font-medium text-slate-700">Tên đăng nhập</label>
+                            <div className="mt-1">
+                                <input id="new-username" name="new-username" type="text" required value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"/>
+                            </div>
+                        </div>
+                        <div>
+                            <label htmlFor="new-password"className="block text-sm font-medium text-slate-700">Mật khẩu</label>
+                            <div className="mt-1">
+                                <input id="new-password" name="new-password" type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"/>
+                            </div>
+                        </div>
+                         <div>
+                            <label htmlFor="confirm-password"className="block text-sm font-medium text-slate-700">Xác nhận Mật khẩu</label>
+                            <div className="mt-1">
+                                <input id="confirm-password" name="confirm-password" type="password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"/>
+                            </div>
+                        </div>
+                        {registerError && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-md border border-red-200 text-center">{registerError}</p>}
+                        <div className="pt-2">
+                            <button type="submit" className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Đăng ký</button>
+                        </div>
+                         <div className="text-center">
+                            <button type="button" onClick={() => { setAuthView('login'); setRegisterError(''); }} className="text-sm font-medium text-indigo-600 hover:text-indigo-500">Đã có tài khoản? Đăng nhập</button>
+                        </div>
+                    </form>
+                )}
+            </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen font-sans flex flex-col">
        <header className="bg-white/80 backdrop-blur-sm shadow-sm sticky top-0 z-40 border-b border-slate-200/80">
             <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex flex-wrap justify-start items-center h-auto sm:h-16 py-2 sm:py-0 space-x-2 sm:space-x-6">
-                    <button onClick={() => setCurrentPage('trang-chu')} className={navItemClasses('trang-chu')}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 22V12h6v10" /></svg>
-                        <span>Trang chủ</span>
-                    </button>
-                     <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
-                     <button onClick={() => setCurrentPage('kiem-quy')} className={navItemClasses('kiem-quy')}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                        <span>Kiểm quỹ</span>
-                    </button>
-                    <button onClick={() => setCurrentPage('kiem-ke')} className={navItemClasses('kiem-ke')}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
-                        <span>Kiểm kê</span>
-                    </button>
-                    <button onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className={navItemClasses('kiem-hang-chuyen-kho')}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        <span>Kiểm Hàng</span>
-                    </button>
-                    <button onClick={() => setCurrentPage('kiem-tra-ton-kho')} className={navItemClasses('kiem-tra-ton-kho')}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                        <span>Tra tồn kho</span>
-                    </button>
-                    <button onClick={() => setCurrentPage('thay-posm')} className={navItemClasses('thay-posm')}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                           <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        <span>Thay POSM</span>
-                    </button>
-                    <div className="flex-grow"></div>
-                     <button onClick={() => setCurrentPage('thong-tin')} className={navItemClasses('thong-tin')}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <span>Thông tin</span>
-                    </button>
+                <div className="flex flex-wrap justify-between items-center h-auto sm:h-16 py-2 sm:py-0">
+                    <div className="flex items-center space-x-2 sm:space-x-4">
+                        <button onClick={() => setCurrentPage('trang-chu')} className={navItemClasses('trang-chu')}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 22V12h6v10" /></svg>
+                            <span className="hidden sm:inline">Trang chủ</span>
+                        </button>
+                         <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
+                         <button onClick={() => setCurrentPage('kiem-quy')} className={navItemClasses('kiem-quy')}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                            <span>Kiểm quỹ</span>
+                        </button>
+                        <button onClick={() => setCurrentPage('kiem-ke')} className={navItemClasses('kiem-ke')}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                            <span>Kiểm kê</span>
+                        </button>
+                        {currentUser?.role === 'admin' && (
+                            <>
+                                <button onClick={() => setCurrentPage('kiem-hang-chuyen-kho')} className={navItemClasses('kiem-hang-chuyen-kho')}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    <span className="hidden sm:inline">Kiểm Hàng</span>
+                                </button>
+                                <button onClick={() => setCurrentPage('kiem-tra-ton-kho')} className={navItemClasses('kiem-tra-ton-kho')}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                    <span className="hidden sm:inline">Tra tồn kho</span>
+                                </button>
+                                <button onClick={() => setCurrentPage('thay-posm')} className={navItemClasses('thay-posm')}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                    <span className="hidden sm:inline">Thay POSM</span>
+                                </button>
+                            </>
+                        )}
+                    </div>
+
+                    <div ref={userMenuRef} className="relative">
+                        <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm bg-slate-100 text-slate-800 hover:bg-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                             </svg>
+                            <span className="font-semibold">{currentUser?.username}</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 text-slate-500 transition-transform duration-200 ${isUserMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                               <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                        </button>
+                        {isUserMenuOpen && (
+                            <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5 z-50">
+                                <button
+                                    onClick={() => { setCurrentPage('thong-tin'); setIsUserMenuOpen(false); }}
+                                    className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <span>Thông tin</span>
+                                </button>
+                                <button
+                                    onClick={handleLogout}
+                                    className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                                    </svg>
+                                    <span>Đăng xuất</span>
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </nav>
         </header>
