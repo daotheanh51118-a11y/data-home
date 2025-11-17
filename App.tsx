@@ -8,7 +8,7 @@ declare global {
   }
 }
 
-type Page = 'trang-chu' | 'kiem-quy' | 'kiem-tra-ton-kho' | 'kiem-ke' | 'thong-tin' | 'kiem-hang-chuyen-kho' | 'thay-posm';
+type Page = 'trang-chu' | 'kiem-quy' | 'kiem-tra-ton-kho' | 'kiem-ke' | 'thong-tin' | 'kiem-hang-chuyen-kho' | 'thay-posm' | 'ma-qr' | 'quet-qr';
 
 type User = {
   username: string;
@@ -275,6 +275,9 @@ export const App: React.FC = () => {
   const [posmItems, setPosmItems] = useState<PosmChangeItem[]>([]);
   const [posmFileName, setPosmFileName] = useState<string>('');
   const [selectedPosmItems, setSelectedPosmItems] = useState<string[]>([]);
+
+  // State for Ma QR
+  const [qrGeneratorText, setQrGeneratorText] = useState<string>('');
 
   // Static data
   const vietQRString = '00020101021138530010A00000072701230006970407010903111993953037045802VN63042731';
@@ -1632,7 +1635,7 @@ export const App: React.FC = () => {
         return (
           <div className="w-full max-w-7xl mx-auto flex flex-col items-center justify-center flex-grow pb-24">
              <h1 className="text-6xl sm:text-7xl font-extrabold text-slate-900 tracking-wide text-center">TRANG HỖ TRỢ CÔNG VIỆC</h1>
-             <div className="mt-12 w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 text-center">
+             <div className="mt-12 w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 text-center">
                 
                 <div onClick={() => setCurrentPage('kiem-quy')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-blue-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
                     <div className="flex-shrink-0 bg-blue-100 text-blue-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-blue-200">
@@ -1669,6 +1672,13 @@ export const App: React.FC = () => {
                         </svg>
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-purple-600 transition-colors duration-300">Thay POSM</h2>
+                </div>
+                
+                <div onClick={() => setCurrentPage('ma-qr')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-slate-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
+                    <div className="flex-shrink-0 bg-slate-100 text-slate-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-slate-200">
+                        <span className="material-symbols-outlined" style={{ fontSize: '40px' }}>qr_code_2</span>
+                    </div>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-slate-600 transition-colors duration-300">Tạo Mã QR</h2>
                 </div>
              </div>
           </div>
@@ -2400,6 +2410,22 @@ export const App: React.FC = () => {
                                 </ul>
                             </div>
                         </div>
+                        <div className="mt-8 pt-6 border-t border-slate-200">
+                            <h3 className="text-xl font-bold text-slate-800 mb-3 flex items-center gap-3">
+                                <span className="material-symbols-outlined text-red-500">bug_report</span>
+                                Phản hồi & Báo lỗi
+                            </h3>
+                            <p className="text-sm text-slate-600 mb-4">
+                                Ứng dụng đang trong quá trình phát triển, nếu có lỗi gì vui lòng phản hồi về gmail của tôi.
+                            </p>
+                            <a
+                                href="mailto:daotheanh.dev@gmail.com?subject=[Báo lỗi] Hỗ Trợ Công Việc&body=Vui lòng mô tả chi tiết lỗi bạn gặp phải và đính kèm ảnh chụp màn hình (nếu có):%0D%0A%0D%0A"
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 font-semibold rounded-lg border border-red-200 hover:bg-red-200/60 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-200 text-sm"
+                            >
+                                <span className="material-symbols-outlined text-base">email</span>
+                                <span>Báo lỗi qua Gmail</span>
+                            </a>
+                        </div>
                     </div>
 
                     <div className="space-y-6">
@@ -2437,6 +2463,56 @@ export const App: React.FC = () => {
                 </div>
             </div>
           );
+      case 'ma-qr':
+        return (
+            <div className="w-full max-w-2xl mx-auto">
+                <header className="text-center mb-8">
+                    <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">TẠO MÃ QR CODE</h1>
+                    <p className="mt-2 text-lg text-slate-600">Nhập văn bản hoặc dán một liên kết để tạo mã QR của bạn.</p>
+                </header>
+                <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
+                    <div>
+                        <label htmlFor="qr-input" className="block text-sm font-semibold text-slate-700 mb-2">
+                            Nội dung mã QR
+                        </label>
+                        <textarea
+                            id="qr-input"
+                            rows={4}
+                            value={qrGeneratorText}
+                            onChange={(e) => setQrGeneratorText(e.target.value)}
+                            placeholder="Nhập văn bản hoặc liên kết vào đây..."
+                            className="w-full p-3 bg-white border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                        />
+                    </div>
+                    {qrGeneratorText && (
+                        <div className="mt-6 pt-6 border-t border-slate-200 flex flex-col items-center">
+                            <h3 className="text-lg font-semibold text-slate-800 mb-4">Mã QR của bạn:</h3>
+                            <div className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm inline-block">
+                                <QRCodeComponent text={qrGeneratorText} size={256} />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+      case 'quet-qr':
+        return (
+            <div className="w-full max-w-2xl mx-auto">
+                <header className="text-center mb-8">
+                    <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">QUÉT MÃ QR</h1>
+                    <p className="mt-2 text-lg text-slate-600">Sử dụng camera của bạn để quét mã vạch hoặc mã QR.</p>
+                </header>
+                <div className="bg-white p-8 rounded-xl shadow-md border border-slate-200/80 text-center">
+                     <div className="flex justify-center items-center mb-6">
+                        <div className="p-4 rounded-full bg-indigo-100">
+                            <span className="material-symbols-outlined text-5xl text-indigo-600">qr_code_scanner</span>
+                        </div>
+                    </div>
+                    <h2 className="text-xl font-semibold text-slate-800">Chức năng đang được phát triển</h2>
+                    <p className="text-slate-500 mt-2">Tính năng quét mã QR trực tiếp từ camera sẽ sớm được ra mắt. Vui lòng quay lại sau!</p>
+                </div>
+            </div>
+        );
       default:
         return null;
     }
@@ -2556,23 +2632,25 @@ export const App: React.FC = () => {
     <div className="min-h-screen font-sans flex flex-col">
        <header className="bg-white/80 backdrop-blur-sm shadow-sm sticky top-0 z-40 border-b border-slate-200/80">
             <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex flex-wrap justify-between items-center h-auto sm:h-16 py-2 sm:py-0">
-                    <div className="flex items-center space-x-2 sm:space-x-4">
+                <div className="flex w-full items-center h-auto sm:h-16 py-2 sm:py-0">
+                    <div className="flex-shrink-0">
                         <button onClick={() => setCurrentPage('trang-chu')} className={navItemClasses('trang-chu')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 22V12h6v10" /></svg>
                             <span className="hidden sm:inline">Trang chủ</span>
                         </button>
+                    </div>
+
+                    <div className="flex-grow flex items-center justify-center flex-wrap gap-x-1 sm:gap-x-2">
                          <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
                          <button onClick={() => setCurrentPage('kiem-quy')} className={navItemClasses('kiem-quy')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                            <span>Kiểm quỹ</span>
+                            <span className="hidden sm:inline">Kiểm quỹ</span>
                         </button>
                         <button onClick={() => setCurrentPage('kiem-ke')} className={navItemClasses('kiem-ke')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
-                            <span>Kiểm kê</span>
+                            <span className="hidden sm:inline">Kiểm kê</span>
                         </button>
-
-                        <button onClick={() => handleAdminFeatureClick('kiem-hang-chuyen-kho')} className={`${navItemClasses('kiem-hang-chuyen-kho')} ${!isAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                         <button onClick={() => handleAdminFeatureClick('kiem-hang-chuyen-kho')} className={`${navItemClasses('kiem-hang-chuyen-kho')} ${!isAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                             <span className="hidden sm:inline">Kiểm Hàng</span>
                         </button>
@@ -2586,20 +2664,24 @@ export const App: React.FC = () => {
                             </svg>
                             <span className="hidden sm:inline">Thay POSM</span>
                         </button>
+                        <button onClick={() => setCurrentPage('quet-qr')} className={navItemClasses('quet-qr')}>
+                            <span className="material-symbols-outlined" style={{ fontSize: '22px' }}>qr_code_scanner</span>
+                             <span className="hidden sm:inline">Quét QR</span>
+                        </button>
                     </div>
 
-                    <div ref={userMenuRef} className="relative">
-                        <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm bg-slate-100 text-slate-800 hover:bg-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <div ref={userMenuRef} className="relative flex-shrink-0">
+                         <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-white">
+                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
                              </svg>
-                            <span className="font-semibold">{currentUser?.username}</span>
-                            <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 text-slate-500 transition-transform duration-200 ${isUserMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                               <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                            </svg>
                         </button>
                         {isUserMenuOpen && (
-                            <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5 z-50">
+                            <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5 z-50">
+                                <div className="px-4 py-2 border-b border-slate-100">
+                                    <p className="text-xs text-slate-500">Đã đăng nhập với tên:</p>
+                                    <p className="text-sm font-semibold text-slate-800 truncate">{currentUser?.username}</p>
+                                </div>
                                 <button
                                     onClick={() => { setCurrentPage('thong-tin'); setIsUserMenuOpen(false); }}
                                     className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
@@ -2607,7 +2689,7 @@ export const App: React.FC = () => {
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
-                                    <span>Thông tin</span>
+                                    <span>Thông tin ứng dụng</span>
                                 </button>
                                 <button
                                     onClick={handleLogout}

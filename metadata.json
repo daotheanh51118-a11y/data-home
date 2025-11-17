@@ -1,5 +1,7 @@
 {
   "name": "Hỗ Trợ Công Việc",
   "description": "Ứng dụng giúp thu ngân kiểm tra và đối soát quỹ tiền mặt một cách nhanh chóng và chính xác.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera"
+  ]
 }
