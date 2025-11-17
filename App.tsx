@@ -8,7 +8,7 @@ declare global {
   }
 }
 
-type Page = 'trang-chu' | 'kiem-quy' | 'kiem-tra-ton-kho' | 'kiem-ke' | 'thong-tin' | 'kiem-hang-chuyen-kho' | 'thay-posm' | 'ma-qr' | 'quet-qr';
+type Page = 'trang-chu' | 'kiem-quy' | 'kiem-tra-ton-kho' | 'kiem-ke' | 'thong-tin' | 'kiem-hang-chuyen-kho' | 'thay-posm' | 'ma-qr';
 
 type User = {
   username: string;
@@ -215,6 +215,31 @@ const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ cate
 // --- Main App Component ---
 const SESSION_TIMEOUT_MS = 48 * 60 * 60 * 1000; // 48 hours
 
+const pageTitles: Record<Page, string> = {
+  'trang-chu': 'Trang Chủ',
+  'kiem-quy': 'Kiểm Quỹ',
+  'kiem-ke': 'Kiểm Kê',
+  'kiem-tra-ton-kho': 'Kiểm Tra Tồn Kho',
+  'kiem-hang-chuyen-kho': 'Kiểm Hàng Chuyển Kho',
+  'thay-posm': 'Thay POSM',
+  'ma-qr': 'Tạo Mã QR',
+  'thong-tin': 'Thông Tin',
+};
+
+const ReportBugButton: React.FC<{ onClick: () => void }> = ({ onClick }) => {
+    return (
+        <button
+            onClick={onClick}
+            className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-semibold rounded-full shadow-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-all duration-300 transform hover:scale-105"
+            title="Báo lỗi chức năng này"
+        >
+            <span className="material-symbols-outlined text-base">bug_report</span>
+            <span className="hidden sm:inline text-sm">Báo lỗi</span>
+        </button>
+    );
+};
+
+
 export const App: React.FC = () => {
   // --- State for Authentication ---
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -279,10 +304,70 @@ export const App: React.FC = () => {
   // State for Ma QR
   const [qrGeneratorText, setQrGeneratorText] = useState<string>('');
 
+  // State for Bug Report Modal
+  const [isBugReportOpen, setIsBugReportOpen] = useState<boolean>(false);
+  const [bugReportPage, setBugReportPage] = useState<string>('');
+  const [bugReportSummary, setBugReportSummary] = useState<string>('');
+  const [bugReportDetails, setBugReportDetails] = useState<string>('');
+  const [bugReportScreenshot, setBugReportScreenshot] = useState<File | null>(null);
+  const [bugReportScreenshotPreview, setBugReportScreenshotPreview] = useState<string | null>(null);
+
   // Static data
   const vietQRString = '00020101021138530010A00000072701230006970407010903111993953037045802VN63042731';
   const adminPages: Page[] = ['kiem-tra-ton-kho', 'kiem-hang-chuyen-kho', 'thay-posm'];
   const isAdmin = currentUser?.role === 'admin';
+
+  // --- Bug Report Logic ---
+  const handleOpenBugReport = (page: Page) => {
+      setBugReportPage(pageTitles[page] || 'Chung');
+      setIsBugReportOpen(true);
+  };
+
+  const handleCloseBugReport = () => {
+      setIsBugReportOpen(false);
+      // Delay resetting state to allow for closing animation
+      setTimeout(() => {
+          setBugReportPage('');
+          setBugReportSummary('');
+          setBugReportDetails('');
+          setBugReportScreenshot(null);
+          if (bugReportScreenshotPreview) {
+             URL.revokeObjectURL(bugReportScreenshotPreview);
+          }
+          setBugReportScreenshotPreview(null);
+      }, 300);
+  };
+
+  const handleScreenshotChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (bugReportScreenshotPreview) {
+          URL.revokeObjectURL(bugReportScreenshotPreview);
+      }
+      if (e.target.files && e.target.files[0]) {
+          const file = e.target.files[0];
+          setBugReportScreenshot(file);
+          setBugReportScreenshotPreview(URL.createObjectURL(file));
+      } else {
+          setBugReportScreenshot(null);
+          setBugReportScreenshotPreview(null);
+      }
+  };
+
+  const handleBugReportSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      const subject = `[Báo lỗi] Hỗ Trợ Công Việc - Chức năng: ${bugReportPage}`;
+      let body = `Tình trạng lỗi:\n${bugReportSummary}\n\n`;
+      body += `Nội dung chi tiết:\n${bugReportDetails}\n\n`;
+      if (bugReportScreenshot) {
+          body += `------------------------------------------------------\n`;
+          body += `LƯU Ý: Vui lòng đính kèm tệp ảnh chụp màn hình "${bugReportScreenshot.name}" vào email này để chúng tôi có thể hỗ trợ tốt nhất.\n`;
+          body += `------------------------------------------------------`;
+      }
+      
+      const mailtoLink = `mailto:daotheanh51118@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      window.location.href = mailtoLink;
+      handleCloseBugReport();
+  };
+
 
   // --- Authentication & Session Logic ---
   const handleLogout = () => {
@@ -2418,13 +2503,13 @@ export const App: React.FC = () => {
                             <p className="text-sm text-slate-600 mb-4">
                                 Ứng dụng đang trong quá trình phát triển, nếu có lỗi gì vui lòng phản hồi về gmail của tôi.
                             </p>
-                            <a
-                                href="mailto:daotheanh.dev@gmail.com?subject=[Báo lỗi] Hỗ Trợ Công Việc&body=Vui lòng mô tả chi tiết lỗi bạn gặp phải và đính kèm ảnh chụp màn hình (nếu có):%0D%0A%0D%0A"
+                            <button
+                                onClick={() => handleOpenBugReport('thong-tin')}
                                 className="inline-flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 font-semibold rounded-lg border border-red-200 hover:bg-red-200/60 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-200 text-sm"
                             >
                                 <span className="material-symbols-outlined text-base">email</span>
                                 <span>Báo lỗi qua Gmail</span>
-                            </a>
+                            </button>
                         </div>
                     </div>
 
@@ -2468,7 +2553,6 @@ export const App: React.FC = () => {
             <div className="w-full max-w-2xl mx-auto">
                 <header className="text-center mb-8">
                     <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">TẠO MÃ QR CODE</h1>
-                    <p className="mt-2 text-lg text-slate-600">Nhập văn bản hoặc dán một liên kết để tạo mã QR của bạn.</p>
                 </header>
                 <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
                     <div>
@@ -2492,24 +2576,6 @@ export const App: React.FC = () => {
                             </div>
                         </div>
                     )}
-                </div>
-            </div>
-        );
-      case 'quet-qr':
-        return (
-            <div className="w-full max-w-2xl mx-auto">
-                <header className="text-center mb-8">
-                    <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">QUÉT MÃ QR</h1>
-                    <p className="mt-2 text-lg text-slate-600">Sử dụng camera của bạn để quét mã vạch hoặc mã QR.</p>
-                </header>
-                <div className="bg-white p-8 rounded-xl shadow-md border border-slate-200/80 text-center">
-                     <div className="flex justify-center items-center mb-6">
-                        <div className="p-4 rounded-full bg-indigo-100">
-                            <span className="material-symbols-outlined text-5xl text-indigo-600">qr_code_scanner</span>
-                        </div>
-                    </div>
-                    <h2 className="text-xl font-semibold text-slate-800">Chức năng đang được phát triển</h2>
-                    <p className="text-slate-500 mt-2">Tính năng quét mã QR trực tiếp từ camera sẽ sớm được ra mắt. Vui lòng quay lại sau!</p>
                 </div>
             </div>
         );
@@ -2664,9 +2730,9 @@ export const App: React.FC = () => {
                             </svg>
                             <span className="hidden sm:inline">Thay POSM</span>
                         </button>
-                        <button onClick={() => setCurrentPage('quet-qr')} className={navItemClasses('quet-qr')}>
-                            <span className="material-symbols-outlined" style={{ fontSize: '22px' }}>qr_code_scanner</span>
-                             <span className="hidden sm:inline">Quét QR</span>
+                        <button onClick={() => setCurrentPage('ma-qr')} className={navItemClasses('ma-qr')}>
+                            <span className="material-symbols-outlined" style={{ fontSize: '22px' }}>qr_code_2</span>
+                             <span className="hidden sm:inline">Tạo Mã QR</span>
                         </button>
                     </div>
 
@@ -2709,6 +2775,73 @@ export const App: React.FC = () => {
       <main className="w-full text-slate-800 flex flex-grow flex-col items-center p-4 sm:p-6 lg:p-8">
         {renderContent()}
       </main>
+      {currentPage !== 'trang-chu' && currentPage !== 'thong-tin' && <ReportBugButton onClick={() => handleOpenBugReport(currentPage)} />}
+      
+      {isBugReportOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={handleCloseBugReport}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[95vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                <header className="p-5 border-b border-slate-200 flex justify-between items-center flex-shrink-0">
+                    <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-red-500">bug_report</span>
+                        <span>Báo Lỗi: {bugReportPage}</span>
+                    </h2>
+                    <button onClick={handleCloseBugReport} className="text-slate-500 hover:text-slate-800 transition-colors rounded-full p-1 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </header>
+                <form onSubmit={handleBugReportSubmit} className="p-6 overflow-y-auto space-y-5 flex-grow">
+                    <div>
+                        <label htmlFor="bug-summary" className="block text-sm font-semibold text-slate-700 mb-1.5">Tình trạng lỗi <span className="text-red-500">*</span></label>
+                        <input
+                            id="bug-summary"
+                            type="text"
+                            value={bugReportSummary}
+                            onChange={(e) => setBugReportSummary(e.target.value)}
+                            placeholder="Ví dụ: Không thể in POSM, Lỗi tính toán quỹ..."
+                            className="w-full p-2 bg-white border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                            required
+                        />
+                    </div>
+                     <div>
+                        <label htmlFor="bug-details" className="block text-sm font-semibold text-slate-700 mb-1.5">Nội dung chi tiết <span className="text-red-500">*</span></label>
+                        <textarea
+                            id="bug-details"
+                            rows={5}
+                            value={bugReportDetails}
+                            onChange={(e) => setBugReportDetails(e.target.value)}
+                            placeholder="Vui lòng mô tả các bước để tái hiện lỗi, và kết quả bạn mong đợi."
+                            className="w-full p-2 bg-white border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label htmlFor="bug-screenshot" className="block text-sm font-semibold text-slate-700 mb-1.5">Hình ảnh lỗi</label>
+                        <input
+                            id="bug-screenshot"
+                            type="file"
+                            accept="image/*"
+                            onChange={handleScreenshotChange}
+                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                        />
+                        {bugReportScreenshotPreview && (
+                             <div className="mt-4 p-2 border border-slate-200 rounded-lg inline-block">
+                                <img src={bugReportScreenshotPreview} alt="Xem trước ảnh lỗi" className="max-h-40 rounded" />
+                            </div>
+                        )}
+                        <p className="mt-1.5 text-xs text-slate-500">Vui lòng chụp ảnh màn hình lỗi và tải lên tại đây.</p>
+                    </div>
+                </form>
+                <footer className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end items-center gap-3 flex-shrink-0">
+                    <button type="button" onClick={handleCloseBugReport} className="px-4 py-2 text-sm bg-white text-slate-700 border border-slate-300 font-semibold rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-400">
+                        Hủy
+                    </button>
+                    <button type="submit" form="bug-report-form" onClick={handleBugReportSubmit} className="px-4 py-2 text-sm bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+                        Gửi Báo Lỗi
+                    </button>
+                </footer>
+            </div>
+        </div>
+    )}
     </div>
   );
 };
