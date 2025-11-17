@@ -2483,15 +2483,27 @@ export const App: React.FC = () => {
                             Phiên bản hiện tại
                         </h2>
                         <div>
-                             <div>
+                            <div>
                                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                                    <span className="bg-indigo-600 text-white font-bold text-sm px-3 py-1 rounded-full">v1.4.0</span>
-                                    <h3 className="text-lg font-semibold text-slate-800">Tối ưu & Đồng bộ hóa</h3>
+                                    <span className="bg-indigo-600 text-white font-bold text-sm px-3 py-1 rounded-full">v1.5.0</span>
+                                    <h3 className="text-lg font-semibold text-slate-800">Nâng Cấp Trải Nghiệm & Báo Lỗi</h3>
                                 </div>
                                 <ul className="mt-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Đồng bộ hóa giao diện và văn bản của thanh "Nhập từ Excel" trên toàn bộ ứng dụng.</li>
-                                    <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>Tối ưu hóa bố cục và font chữ trong chức năng in POSM (khổ A6) để đảm bảo không bị mất thông tin.</li>
-                                     <li className="relative pl-2"><span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span><span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-red-100 text-red-800">[SỬA LỖI]</span>Rút gọn nội dung khuyến mãi quá dài và tinh chỉnh lại toàn bộ phần diễn giải, hướng dẫn trong các chức năng.</li>
+                                    <li className="relative pl-2">
+                                        <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-green-300"></span>
+                                        <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[TÍNH NĂNG MỚI]</span>
+                                        Hệ thống báo lỗi nâng cao: Thay thế nút báo lỗi cũ bằng biểu mẫu chi tiết, cho phép đính kèm ảnh chụp màn hình để phản hồi chính xác hơn.
+                                    </li>
+                                    <li className="relative pl-2">
+                                        <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span>
+                                        <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>
+                                        Giao diện "Tạo Mã QR" được cập nhật với ô nhập liệu một dòng, giúp giao diện gọn gàng và đồng nhất hơn.
+                                    </li>
+                                    <li className="relative pl-2">
+                                        <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span>
+                                        <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>
+                                        Thanh điều hướng được làm rõ: chức năng "Quét QR" đã được đổi tên thành "Tạo Mã QR" để phản ánh đúng mục đích sử dụng.
+                                    </li>
                                 </ul>
                             </div>
                         </div>
@@ -2559,9 +2571,9 @@ export const App: React.FC = () => {
                         <label htmlFor="qr-input" className="block text-sm font-semibold text-slate-700 mb-2">
                             Nội dung mã QR
                         </label>
-                        <textarea
+                        <input
                             id="qr-input"
-                            rows={4}
+                            type="text"
                             value={qrGeneratorText}
                             onChange={(e) => setQrGeneratorText(e.target.value)}
                             placeholder="Nhập văn bản hoặc liên kết vào đây..."
