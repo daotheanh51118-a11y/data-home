@@ -303,8 +303,13 @@ export const App: React.FC = () => {
   const [registerSuccess, setRegisterSuccess] = useState('');
   
   const [currentPage, setCurrentPage] = useState<Page>('trang-chu');
+  
+  // Dropdowns state
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  
+  const [isFeatureMenuOpen, setIsFeatureMenuOpen] = useState(false);
+  const featureMenuRef = useRef<HTMLDivElement>(null);
   
   // State for Kiem Quy
   const [counts, setCounts] = useState<Record<number, number>>(
@@ -537,6 +542,9 @@ export const App: React.FC = () => {
     const handleClickOutside = (event: MouseEvent) => {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
         setIsUserMenuOpen(false);
+      }
+      if (featureMenuRef.current && !featureMenuRef.current.contains(event.target as Node)) {
+        setIsFeatureMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -2100,13 +2108,6 @@ export const App: React.FC = () => {
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-slate-600 transition-colors duration-300">Tạo Mã QR / Barcode</h2>
                 </div>
 
-                <div onClick={() => handleFeatureClick('tinh-thuong')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-orange-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
-                    <div className="flex-shrink-0 bg-orange-100 text-orange-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-orange-200">
-                         <span className="material-symbols-outlined" style={{ fontSize: '40px' }}>calculate</span>
-                    </div>
-                    <h2 className="text-base font-bold text-slate-800 group-hover:text-orange-600 transition-colors duration-300">Tính Thưởng</h2>
-                </div>
-
              </div>
           </div>
         );
@@ -3263,10 +3264,34 @@ export const App: React.FC = () => {
                             </svg>
                             <span className="hidden sm:inline">Thay POSM</span>
                         </button>
-                        <button onClick={() => handleFeatureClick('ma-qr')} className={`${navItemClasses('ma-qr')} ${isFeatureLocked('ma-qr') ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                            <span className="material-symbols-outlined" style={{ fontSize: '22px' }}>qr_code_2</span>
-                             <span className="hidden sm:inline">Tạo Mã QR</span>
-                        </button>
+                        
+                        <div ref={featureMenuRef} className="relative">
+                            <button onClick={() => setIsFeatureMenuOpen(!isFeatureMenuOpen)} className={`flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-white text-slate-700 hover:bg-slate-100 hover:text-slate-900`}>
+                                <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>widgets</span>
+                                <span className="hidden sm:inline">Chức năng</span>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </button>
+                            {isFeatureMenuOpen && (
+                                <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5 z-50">
+                                    <button
+                                        onClick={() => { handleFeatureClick('ma-qr'); setIsFeatureMenuOpen(false); }}
+                                        className={`w-full text-left flex items-center gap-3 px-4 py-2 text-sm ${isFeatureLocked('ma-qr') ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-slate-100'}`}
+                                    >
+                                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>qr_code_2</span>
+                                        <span>Tạo Mã QR / Barcode</span>
+                                    </button>
+                                    <button
+                                        onClick={() => { handleFeatureClick('tinh-thuong'); setIsFeatureMenuOpen(false); }}
+                                        className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                                    >
+                                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>calculate</span>
+                                        <span>Tính Thưởng</span>
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     <div ref={userMenuRef} className="relative flex-shrink-0">
