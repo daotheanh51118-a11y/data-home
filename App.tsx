@@ -359,7 +359,9 @@ export const App: React.FC = () => {
   const [bonusImages, setBonusImages] = useState<File[]>([]);
   const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
   const [isAnalyzingBonus, setIsAnalyzingBonus] = useState<boolean>(false);
-  const [bonusFilterQuery, setBonusFilterQuery] = useState<string>('');
+  const [excludedBonusIndices, setExcludedBonusIndices] = useState<number[]>([]);
+  const [isBonusFilterMode, setIsBonusFilterMode] = useState<boolean>(false);
+  const [bonusDeduction, setBonusDeduction] = useState<number>(0);
 
   // State for Bug Report Modal
   const [isBugReportOpen, setIsBugReportOpen] = useState<boolean>(false);
@@ -1319,11 +1321,12 @@ export const App: React.FC = () => {
 
       setIsAnalyzingBonus(true);
       setBonusItems([]);
+      setExcludedBonusIndices([]); // Reset excluded items
 
       try {
           // Assuming process.env.API_KEY is available as per instructions
           // In a real app, user might need to provide this or it's in env
-          const apiKey = process.env.API_KEY; 
+          const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
           
           if (!apiKey) {
               throw new Error("API Key not configured");
@@ -1405,19 +1408,37 @@ export const App: React.FC = () => {
       }
   };
 
-  const filteredBonusItems = useMemo(() => {
-      if (!bonusFilterQuery) return bonusItems;
-      return bonusItems.filter(item => 
-          item.description.toLowerCase().includes(bonusFilterQuery.trim().toLowerCase())
-      );
-  }, [bonusItems, bonusFilterQuery]);
+  const activeBonusItems = useMemo(() => {
+      return bonusItems.filter((_, idx) => !excludedBonusIndices.includes(idx));
+  }, [bonusItems, excludedBonusIndices]);
 
-  const totalBonus = useMemo(() => filteredBonusItems.reduce((acc, item) => acc + item.amount, 0), [filteredBonusItems]);
-  // Use Math.round to ensure integers and avoid floating point errors
+  const totalBonus = useMemo(() => activeBonusItems.reduce((acc, item) => acc + item.amount, 0), [activeBonusItems]);
+  
+  // Logic: 
+  // Manager: 30% of Total
+  // Staff Pool: Total - Manager Share
+  // Final Staff Pool for Division = Staff Pool - Deductions
+  
   const managerShare = Math.round(totalBonus * 0.3);
-  const staffShare = totalBonus - managerShare; // Ensures the sum is exactly totalBonus
+  const staffShare = totalBonus - managerShare; // Ensures the sum is exactly totalBonus (before deduction)
+  const actualStaffShare = staffShare - bonusDeduction;
+  
   const staffMembers = ["Đào Thế Anh", "Du Thanh Phong", "Đào Thị Thu Hiền"];
-  const perStaffShare = Math.round(staffShare / staffMembers.length);
+  const perStaffShare = Math.round(actualStaffShare / staffMembers.length);
+
+  const toggleBonusItem = (index: number) => {
+      setExcludedBonusIndices(prev => {
+          if (prev.includes(index)) {
+              return prev.filter(i => i !== index); // Include it back
+          } else {
+              return [...prev, index]; // Exclude it
+          }
+      });
+  };
+
+  const handleBonusDeductionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setBonusDeduction(parseFormattedNumber(e.target.value));
+  };
 
   // --- Thay POSM Logic ---
   const handlePosmFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -3068,41 +3089,51 @@ export const App: React.FC = () => {
                                     <span className="material-symbols-outlined text-blue-600">receipt_long</span>
                                     Chi Tiết Thu Nhập
                                 </h3>
+                                <button 
+                                    onClick={() => setIsBonusFilterMode(!isBonusFilterMode)}
+                                    className={`p-2 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${isBonusFilterMode ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                    title="Lọc các khoản thu nhập"
+                                >
+                                    <span className="material-symbols-outlined">filter_list</span>
+                                </button>
                               </div>
                               
-                              <div className="mb-4 relative">
-                                    <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                                        <svg className="w-4 h-4 text-slate-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20">
-                                            <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"/>
-                                        </svg>
-                                    </div>
-                                    <input 
-                                        type="text" 
-                                        className="block w-full p-2.5 pl-10 text-sm text-slate-900 border border-slate-300 rounded-lg bg-slate-50 focus:ring-blue-500 focus:border-blue-500 focus:outline-none" 
-                                        placeholder="Lọc theo tên khoản thu..." 
-                                        value={bonusFilterQuery}
-                                        onChange={(e) => setBonusFilterQuery(e.target.value)}
-                                    />
-                              </div>
-
-                              <div className="space-y-3">
-                                  {filteredBonusItems.length > 0 ? filteredBonusItems.map((item, index) => (
-                                      <div key={index} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-100">
-                                          <span className="font-medium text-slate-700">{item.description}</span>
-                                          <span className="font-mono font-bold text-slate-900">{formatCurrency(item.amount)}</span>
+                              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                                  {(isBonusFilterMode ? bonusItems : activeBonusItems).length > 0 ? (isBonusFilterMode ? bonusItems : activeBonusItems).map((item, index) => {
+                                      // If activeBonusItems is used, index is different, so we need true index for toggle
+                                      const trueIndex = isBonusFilterMode ? index : bonusItems.indexOf(item);
+                                      const isExcluded = excludedBonusIndices.includes(trueIndex);
+                                      
+                                      return (
+                                      <div key={trueIndex} className={`flex items-center p-3 rounded-lg border ${isExcluded ? 'bg-slate-100 border-slate-200 opacity-60' : 'bg-slate-50 border-slate-100'}`}>
+                                          {isBonusFilterMode && (
+                                              <div className="mr-3 flex items-center">
+                                                  <input 
+                                                      type="checkbox" 
+                                                      checked={!isExcluded}
+                                                      onChange={() => toggleBonusItem(trueIndex)}
+                                                      className="w-5 h-5 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                                                  />
+                                              </div>
+                                          )}
+                                          <div className="flex-grow flex justify-between items-center">
+                                              <span className={`font-medium ${isExcluded ? 'text-slate-500 line-through' : 'text-slate-700'}`}>{item.description}</span>
+                                              <span className={`font-mono font-bold ${isExcluded ? 'text-slate-500' : 'text-slate-900'}`}>{formatCurrency(item.amount)}</span>
+                                          </div>
                                       </div>
-                                  )) : (
-                                      <div className="text-center py-4 text-slate-500 italic">Không tìm thấy khoản thu nhập nào phù hợp.</div>
+                                  )}) : (
+                                      <div className="text-center py-4 text-slate-500 italic">Không tìm thấy khoản thu nhập nào.</div>
                                   )}
-                                  <div className="pt-3 mt-3 border-t border-slate-200 flex justify-between items-center">
-                                      <span className="font-bold text-lg text-slate-800">TỔNG CỘNG</span>
-                                      <span className="font-mono font-bold text-xl text-indigo-600">{formatCurrency(totalBonus)}</span>
-                                  </div>
+                              </div>
+                              
+                              <div className="pt-3 mt-3 border-t border-slate-200 flex justify-between items-center">
+                                  <span className="font-bold text-lg text-slate-800">TỔNG CỘNG</span>
+                                  <span className="font-mono font-bold text-xl text-indigo-600">{formatCurrency(totalBonus)}</span>
                               </div>
                           </div>
 
                           {/* Bảng phân chia */}
-                          <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
+                          <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80 h-fit">
                               <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
                                   <span className="material-symbols-outlined text-green-600">pie_chart</span>
                                   Bảng Phân Chia Thưởng
@@ -3117,7 +3148,24 @@ export const App: React.FC = () => {
                               </div>
 
                               <div>
-                                  <h4 className="text-sm font-semibold text-slate-500 uppercase mb-2">Phần Nhân Sự (70%) - {formatCurrency(staffShare)}</h4>
+                                  <h4 className="text-sm font-semibold text-slate-500 uppercase mb-2 flex justify-between items-center">
+                                      <span>Phần Nhân Sự (70%)</span>
+                                      <span className="font-mono text-slate-700">{formatCurrency(staffShare)}</span>
+                                  </h4>
+                                  
+                                  <div className="mb-3 flex items-center gap-2">
+                                      <label htmlFor="deduction" className="text-sm font-medium text-slate-600 whitespace-nowrap">Trừ (Truy thu/Chi):</label>
+                                      <input 
+                                          id="deduction"
+                                          type="text" 
+                                          inputMode="numeric"
+                                          value={formatNumber(bonusDeduction)}
+                                          onChange={handleBonusDeductionChange}
+                                          placeholder="0"
+                                          className="w-full p-2 text-right text-sm border border-slate-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                                      />
+                                  </div>
+
                                   <div className="bg-slate-50 border border-slate-200 rounded-lg overflow-hidden">
                                       <table className="w-full text-sm text-left">
                                           <thead className="bg-slate-100 text-slate-600 font-semibold">
@@ -3136,6 +3184,11 @@ export const App: React.FC = () => {
                                           </tbody>
                                       </table>
                                   </div>
+                                  {bonusDeduction > 0 && (
+                                      <p className="text-xs text-slate-500 mt-2 text-right italic">
+                                          * Đã trừ {formatCurrency(bonusDeduction)} trước khi chia.
+                                      </p>
+                                  )}
                               </div>
                           </div>
                       </div>
