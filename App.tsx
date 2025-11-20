@@ -359,6 +359,7 @@ export const App: React.FC = () => {
   const [bonusImages, setBonusImages] = useState<File[]>([]);
   const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
   const [isAnalyzingBonus, setIsAnalyzingBonus] = useState<boolean>(false);
+  const [bonusFilterQuery, setBonusFilterQuery] = useState<string>('');
 
   // State for Bug Report Modal
   const [isBugReportOpen, setIsBugReportOpen] = useState<boolean>(false);
@@ -1335,19 +1336,19 @@ export const App: React.FC = () => {
           );
 
           const prompt = `
-              Hãy phân tích các hình ảnh này và trích xuất số tiền cho các mục sau: 
-              1. "Thưởng thi đua"
-              2. "Trợ cấp nộp tiền" 
-              3. "Khoán công việc"
+              Bạn là một trợ lý kế toán chuyên nghiệp. Nhiệm vụ của bạn là trích xuất chính xác số tiền từ hình ảnh bảng lương/thưởng cho các mục tiêu cụ thể sau:
+              1. "Thưởng thi đua" (hoặc các biến thể như: Tiền thưởng thi đua, Thưởng doanh số, Incentive...)
+              2. "Trợ cấp nộp tiền" (hoặc các biến thể như: Phụ cấp nộp tiền, Tiền nộp tiền...) 
+              3. "Khoán công việc" (hoặc các biến thể như: Lương khoán, Tiền khoán, Khoán...)
               
-              Trả về kết quả dưới dạng JSON với cấu trúc:
-              {
-                "items": [
-                  { "description": "Thưởng thi đua", "amount": 1000000 },
-                  ...
-                ]
-              }
-              Chỉ lấy số tiền (number), loại bỏ các ký tự tiền tệ. Nếu không thấy mục nào thì bỏ qua hoặc để 0.
+              YÊU CẦU QUAN TRỌNG:
+              - Tìm kiếm tất cả các mục khớp với từ khóa trên trong các hình ảnh.
+              - Số tiền ("amount") phải được chuyển đổi thành số nguyên (Integer), loại bỏ mọi dấu chấm phân cách hàng nghìn, dấu phẩy hoặc ký hiệu tiền tệ (Ví dụ: "1.000.000" -> 1000000).
+              - Nếu một mục xuất hiện nhiều lần (ví dụ nhiều dòng "Khoán công việc"), hãy liệt kê tất cả chúng thành các item riêng biệt.
+              - Tuyệt đối KHÔNG tự tính tổng. Hãy trả về từng mục tìm thấy.
+              - Nếu không tìm thấy mục nào, trả về danh sách rỗng.
+
+              Trả về kết quả dưới dạng JSON.
           `;
 
           // Updated to usage of generateContent with proper structure for mix of text and image
@@ -1404,11 +1405,19 @@ export const App: React.FC = () => {
       }
   };
 
-  const totalBonus = useMemo(() => bonusItems.reduce((acc, item) => acc + item.amount, 0), [bonusItems]);
-  const managerShare = totalBonus * 0.3;
-  const staffShare = totalBonus * 0.7;
+  const filteredBonusItems = useMemo(() => {
+      if (!bonusFilterQuery) return bonusItems;
+      return bonusItems.filter(item => 
+          item.description.toLowerCase().includes(bonusFilterQuery.trim().toLowerCase())
+      );
+  }, [bonusItems, bonusFilterQuery]);
+
+  const totalBonus = useMemo(() => filteredBonusItems.reduce((acc, item) => acc + item.amount, 0), [filteredBonusItems]);
+  // Use Math.round to ensure integers and avoid floating point errors
+  const managerShare = Math.round(totalBonus * 0.3);
+  const staffShare = totalBonus - managerShare; // Ensures the sum is exactly totalBonus
   const staffMembers = ["Đào Thế Anh", "Du Thanh Phong", "Đào Thị Thu Hiền"];
-  const perStaffShare = staffShare / staffMembers.length;
+  const perStaffShare = Math.round(staffShare / staffMembers.length);
 
   // --- Thay POSM Logic ---
   const handlePosmFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -3054,17 +3063,37 @@ export const App: React.FC = () => {
                       <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
                           {/* Kết quả phân tích */}
                           <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
-                              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                  <span className="material-symbols-outlined text-blue-600">receipt_long</span>
-                                  Chi Tiết Các Khoản Thu Nhập
-                              </h3>
+                              <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <span className="material-symbols-outlined text-blue-600">receipt_long</span>
+                                    Chi Tiết Thu Nhập
+                                </h3>
+                              </div>
+                              
+                              <div className="mb-4 relative">
+                                    <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                                        <svg className="w-4 h-4 text-slate-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20">
+                                            <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"/>
+                                        </svg>
+                                    </div>
+                                    <input 
+                                        type="text" 
+                                        className="block w-full p-2.5 pl-10 text-sm text-slate-900 border border-slate-300 rounded-lg bg-slate-50 focus:ring-blue-500 focus:border-blue-500 focus:outline-none" 
+                                        placeholder="Lọc theo tên khoản thu..." 
+                                        value={bonusFilterQuery}
+                                        onChange={(e) => setBonusFilterQuery(e.target.value)}
+                                    />
+                              </div>
+
                               <div className="space-y-3">
-                                  {bonusItems.map((item, index) => (
+                                  {filteredBonusItems.length > 0 ? filteredBonusItems.map((item, index) => (
                                       <div key={index} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-100">
                                           <span className="font-medium text-slate-700">{item.description}</span>
                                           <span className="font-mono font-bold text-slate-900">{formatCurrency(item.amount)}</span>
                                       </div>
-                                  ))}
+                                  )) : (
+                                      <div className="text-center py-4 text-slate-500 italic">Không tìm thấy khoản thu nhập nào phù hợp.</div>
+                                  )}
                                   <div className="pt-3 mt-3 border-t border-slate-200 flex justify-between items-center">
                                       <span className="font-bold text-lg text-slate-800">TỔNG CỘNG</span>
                                       <span className="font-mono font-bold text-xl text-indigo-600">{formatCurrency(totalBonus)}</span>
