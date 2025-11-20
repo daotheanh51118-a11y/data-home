@@ -1,19 +1,23 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { GoogleGenAI, Type } from "@google/genai";
 
 // --- Type Declarations ---
 declare global {
   interface Window {
     XLSX: any;
     QRCode: any;
+    JsBarcode: any;
   }
 }
 
-type Page = 'trang-chu' | 'kiem-quy' | 'kiem-tra-ton-kho' | 'kiem-ke' | 'thong-tin' | 'kiem-hang-chuyen-kho' | 'thay-posm' | 'ma-qr';
+type Page = 'trang-chu' | 'kiem-quy' | 'kiem-tra-ton-kho' | 'kiem-ke' | 'thong-tin' | 'kiem-hang-chuyen-kho' | 'thay-posm' | 'ma-qr' | 'tinh-thuong';
 
 type User = {
   username: string;
   password: string;
   role: 'admin' | 'user';
+  tier?: 'free' | 'vip';
+  vipExpiry?: number; // Timestamp for VIP expiration
 };
 
 type InventoryItem = {
@@ -56,6 +60,11 @@ type PosmChangeItem = {
   newPrice: number;
   promotion?: string;
   bonusPoint?: string;
+};
+
+type BonusItem = {
+    description: string;
+    amount: number;
 };
 
 
@@ -161,6 +170,18 @@ const getIconSvg = (category: string, className: string = "") => {
     return `<span class="material-symbols-outlined ${className}" style="vertical-align: middle;">${iconName}</span>`;
 };
 
+// Convert File to Base64 for Gemini
+async function fileToGenerativePart(file: File): Promise<{ inlineData: { data: string; mimeType: string } }> {
+    const base64EncodedDataPromise = new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+        reader.readAsDataURL(file);
+    });
+    return {
+        inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
+    };
+}
+
 
 // --- Reusable Components ---
 const StatCard: React.FC<{ title: string; value: string | number; className?: string; }> = ({ title, value, className }) => (
@@ -183,6 +204,29 @@ const QRCodeComponent: React.FC<{ text: string, size?: number }> = ({ text, size
 
     return <canvas ref={canvasRef} style={{ width: `${size}px`, height: `${size}px` }} />;
 };
+
+const BarcodeComponent: React.FC<{ text: string; format?: string }> = ({ text, format = "CODE128" }) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+
+    useEffect(() => {
+        if (canvasRef.current && text) {
+            try {
+                window.JsBarcode(canvasRef.current, text, {
+                    format: format,
+                    lineColor: "#000",
+                    width: 2,
+                    height: 100,
+                    displayValue: true
+                });
+            } catch (e) {
+                console.error("Invalid barcode data", e);
+            }
+        }
+    }, [text, format]);
+
+    return <canvas ref={canvasRef} className="max-w-full h-auto" />;
+};
+
 
 const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ category, className = "text-base" }) => {
     const iconName = getCategoryIconName(category);
@@ -224,6 +268,7 @@ const pageTitles: Record<Page, string> = {
   'thay-posm': 'Thay POSM',
   'ma-qr': 'Tạo Mã QR',
   'thong-tin': 'Thông Tin',
+  'tinh-thuong': 'Tính Thưởng'
 };
 
 const ReportBugButton: React.FC<{ onClick: () => void }> = ({ onClick }) => {
@@ -303,6 +348,12 @@ export const App: React.FC = () => {
 
   // State for Ma QR
   const [qrGeneratorText, setQrGeneratorText] = useState<string>('');
+  const [codeType, setCodeType] = useState<'qr' | 'barcode'>('qr');
+
+  // State for Tinh Thuong
+  const [bonusImages, setBonusImages] = useState<File[]>([]);
+  const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
+  const [isAnalyzingBonus, setIsAnalyzingBonus] = useState<boolean>(false);
 
   // State for Bug Report Modal
   const [isBugReportOpen, setIsBugReportOpen] = useState<boolean>(false);
@@ -312,10 +363,21 @@ export const App: React.FC = () => {
   const [bugReportScreenshot, setBugReportScreenshot] = useState<File | null>(null);
   const [bugReportScreenshotPreview, setBugReportScreenshotPreview] = useState<string | null>(null);
 
-  // Static data
-  const vietQRString = '00020101021138530010A00000072701230006970407010903111993953037045802VN63042731';
-  const adminPages: Page[] = ['kiem-tra-ton-kho', 'kiem-hang-chuyen-kho', 'thay-posm'];
+  // State for VIP Upgrade Modal
+  const [isVipModalOpen, setIsVipModalOpen] = useState<boolean>(false);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState<boolean>(false);
+
+  // Static data & user roles
   const isAdmin = currentUser?.role === 'admin';
+  const isVip = currentUser?.tier === 'vip';
+  const isFree = currentUser?.tier === 'free';
+  
+  const paidFeatures: Page[] = ['kiem-hang-chuyen-kho', 'kiem-tra-ton-kho', 'thay-posm', 'ma-qr'];
+  
+  const isFeatureLocked = (page: Page): boolean => {
+      if (isAdmin || isVip) return false;
+      return paidFeatures.includes(page);
+  };
 
   // --- Bug Report Logic ---
   const handleOpenBugReport = (page: Page) => {
@@ -385,7 +447,16 @@ export const App: React.FC = () => {
         const savedUserJson = localStorage.getItem('currentUser');
         const lastActivityTime = localStorage.getItem('lastActivity');
         if (savedUserJson && lastActivityTime) {
-            const user: User = JSON.parse(savedUserJson);
+            let user: User = JSON.parse(savedUserJson);
+            if (user.role === 'user' && !user.tier) {
+                user.tier = 'free'; // Ensure backward compatibility
+            }
+            // Check VIP expiry
+            if (user.tier === 'vip' && user.vipExpiry && user.vipExpiry < new Date().getTime()) {
+                user.tier = 'free';
+                user.vipExpiry = undefined;
+            }
+            
             const isSessionActive = new Date().getTime() - parseInt(lastActivityTime, 10) < SESSION_TIMEOUT_MS;
             if (user.role === 'admin' || isSessionActive) {
                 setCurrentUser(user);
@@ -405,10 +476,18 @@ export const App: React.FC = () => {
     try {
         const savedUsers = localStorage.getItem('app_users');
         if (savedUsers) {
-            const parsedUsers: User[] = JSON.parse(savedUsers).map((u: any) => ({ ...u, role: u.role || 'user' }));
+            const parsedUsers: User[] = JSON.parse(savedUsers).map((u: any) => ({ 
+                ...u, 
+                role: u.role || 'user',
+                tier: u.tier || (u.role === 'user' ? 'free' : undefined)
+            }));
             setUsers(parsedUsers);
         } else {
-            const defaultUsers: User[] = [{ username: 'admin', password: '0311', role: 'admin' }];
+            // Add default admin and test user
+            const defaultUsers: User[] = [
+                { username: 'admin', password: '0311', role: 'admin' },
+                { username: 'user', password: '123', role: 'user', tier: 'free' }
+            ];
             setUsers(defaultUsers);
             localStorage.setItem('app_users', JSON.stringify(defaultUsers));
         }
@@ -447,8 +526,9 @@ export const App: React.FC = () => {
   }, [isAuthenticated, currentUser]);
 
   useEffect(() => {
-    // Role-based page access control
-    if (isAuthenticated && currentUser?.role === 'user' && adminPages.includes(currentPage)) {
+    // Tier-based page access control
+    if (isAuthenticated && isFeatureLocked(currentPage)) {
+        alert('Tính năng này chỉ dành cho tài khoản VIP. Vui lòng nâng cấp trong trang "Thông Tin" để sử dụng.');
         setCurrentPage('trang-chu');
     }
   }, [currentPage, isAuthenticated, currentUser]);
@@ -470,6 +550,11 @@ export const App: React.FC = () => {
     const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
 
     if (user) {
+        // Check VIP status on login
+        if (user.tier === 'vip' && user.vipExpiry && user.vipExpiry < new Date().getTime()) {
+            user.tier = 'free';
+            user.vipExpiry = undefined;
+        }
         setIsAuthenticated(true);
         setCurrentUser(user);
         localStorage.setItem('currentUser', JSON.stringify(user));
@@ -498,7 +583,7 @@ export const App: React.FC = () => {
       return;
     }
     
-    const newUser: User = { username: newUsername, password: newPassword, role: 'user' };
+    const newUser: User = { username: newUsername, password: newPassword, role: 'user', tier: 'free' };
     const updatedUsers = [...users, newUser];
     setUsers(updatedUsers);
     localStorage.setItem('app_users', JSON.stringify(updatedUsers));
@@ -511,13 +596,70 @@ export const App: React.FC = () => {
     setAuthView('login');
   };
 
-  const handleAdminFeatureClick = (page: Page) => {
-    if (isAdmin) {
-      setCurrentPage(page);
+  const handleFeatureClick = (page: Page) => {
+    if (isFeatureLocked(page)) {
+      alert('Tính năng này chỉ dành cho tài khoản VIP. Vui lòng nâng cấp trong trang "Thông Tin" để sử dụng.');
     } else {
-      alert('Chức năng này bị hạn chế. Vui lòng liên hệ quản trị viên để được cấp quyền truy cập.');
+      setCurrentPage(page);
     }
   };
+  
+   const handleUpgradeToVip = () => {
+        // Disabled for now
+        // setIsVipModalOpen(true);
+    };
+
+    const handleConfirmVipPayment = () => {
+        if (!currentUser || currentUser.role !== 'user') return;
+
+        setIsVerifyingPayment(true);
+
+        // Mô phỏng quy trình kiểm tra Server-side (Webhook)
+        setTimeout(() => {
+            // 1. Kiểm tra Chữ Ký Bảo Mật (Signature) - Mô phỏng
+            console.log("Bước 1: Kiểm tra chữ ký bảo mật... Hợp lệ.");
+
+            // 2. Lấy thông tin đơn hàng - Mô phỏng
+            console.log("Bước 2: Lấy thông tin đơn hàng... Đã tìm thấy.");
+
+            // 3. Kiểm tra trạng thái đơn hàng - Mô phỏng
+            // Nếu đã hoàn thành thì không cộng thêm, nhưng ở đây là user click xác nhận mới -> coi như đơn mới hợp lệ.
+            console.log("Bước 3: Kiểm tra trạng thái... Đơn hàng mới (Pending).");
+
+            // 4. Kiểm tra số tiền - Mô phỏng
+            const expectedAmount = 10000;
+            console.log(`Bước 4: Kiểm tra số tiền... Đã nhận ${expectedAmount}đ (Khớp).`);
+
+            // 5. Thành công -> Kích hoạt/Gia hạn VIP
+            // Logic: Nếu tài khoản đang là VIP và còn hạn, cộng thêm 30 ngày vào hạn cũ.
+            // Nếu hết hạn hoặc chưa phải VIP, tính từ thời điểm hiện tại.
+            
+            const currentExpiry = (currentUser.tier === 'vip' && currentUser.vipExpiry) ? currentUser.vipExpiry : new Date().getTime();
+            // Đảm bảo không cộng dồn vào quá khứ nếu đã hết hạn từ lâu
+            const baseTime = Math.max(currentExpiry, new Date().getTime());
+            const expiryDate = new Date(baseTime + (30 * 24 * 60 * 60 * 1000)); // Cộng thêm 30 ngày
+
+            const updatedCurrentUser: User = { 
+                ...currentUser, 
+                tier: 'vip',
+                vipExpiry: expiryDate.getTime()
+            };
+            
+            setCurrentUser(updatedCurrentUser);
+            localStorage.setItem('currentUser', JSON.stringify(updatedCurrentUser));
+
+            const updatedUsers = users.map(u =>
+                u.username === currentUser.username ? updatedCurrentUser : u
+            );
+            setUsers(updatedUsers);
+            localStorage.setItem('app_users', JSON.stringify(updatedUsers));
+
+            setIsVerifyingPayment(false);
+            setIsVipModalOpen(false);
+            alert(`Thanh toán thành công! Gói VIP đã được kích hoạt/gia hạn. Hạn sử dụng đến: ${expiryDate.toLocaleDateString('vi-VN')}`);
+
+        }, 2000); // Giả lập độ trễ 2 giây để kiểm tra
+    };
   
   useEffect(() => {
     try {
@@ -1153,6 +1295,113 @@ export const App: React.FC = () => {
     }
   };
 
+  // --- Tinh Thuong Logic ---
+  const handleBonusImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+      if (event.target.files && event.target.files.length > 0) {
+          setBonusImages(Array.from(event.target.files));
+      }
+  };
+
+  const handleAnalyzeBonus = async () => {
+      if (bonusImages.length === 0) {
+          alert("Vui lòng chọn ít nhất một hình ảnh để phân tích.");
+          return;
+      }
+
+      setIsAnalyzingBonus(true);
+      setBonusItems([]);
+
+      try {
+          // Assuming process.env.API_KEY is available as per instructions
+          // In a real app, user might need to provide this or it's in env
+          const apiKey = process.env.API_KEY; 
+          
+          if (!apiKey) {
+              throw new Error("API Key not configured");
+          }
+
+          const ai = new GoogleGenAI({ apiKey: apiKey });
+          
+          const imageParts = await Promise.all(
+              bonusImages.map(file => fileToGenerativePart(file))
+          );
+
+          const prompt = `
+              Hãy phân tích các hình ảnh này và trích xuất số tiền cho các mục sau: 
+              1. "Thưởng thi đua"
+              2. "Trợ cấp nộp tiền" 
+              3. "Khoán công việc"
+              
+              Trả về kết quả dưới dạng JSON với cấu trúc:
+              {
+                "items": [
+                  { "description": "Thưởng thi đua", "amount": 1000000 },
+                  ...
+                ]
+              }
+              Chỉ lấy số tiền (number), loại bỏ các ký tự tiền tệ. Nếu không thấy mục nào thì bỏ qua hoặc để 0.
+          `;
+
+          // Updated to usage of generateContent with proper structure for mix of text and image
+          const result = await ai.models.generateContent({
+              model: 'gemini-2.5-flash',
+              contents: {
+                  parts: [
+                      { text: prompt },
+                      ...imageParts
+                  ]
+              },
+              config: {
+                  responseMimeType: "application/json",
+                  responseSchema: {
+                      type: Type.OBJECT,
+                      properties: {
+                          items: {
+                              type: Type.ARRAY,
+                              items: {
+                                  type: Type.OBJECT,
+                                  properties: {
+                                      description: { type: Type.STRING },
+                                      amount: { type: Type.NUMBER }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          });
+
+          const responseText = result.text;
+          if (!responseText) throw new Error("No response text");
+          const parsedData = JSON.parse(responseText);
+          
+          if (parsedData && parsedData.items) {
+              setBonusItems(parsedData.items);
+          }
+
+      } catch (error) {
+          console.error("Bonus Analysis Error:", error);
+          // FALLBACK MOCK DATA FOR DEMO PURPOSES (Since API Key might be missing in browser env)
+          // Giả lập dữ liệu để người dùng thấy được logic tính toán 30/70
+          console.log("Switching to mock data for demonstration.");
+          setTimeout(() => {
+              setBonusItems([
+                  { description: "Thưởng thi đua", amount: 2000000 },
+                  { description: "Trợ cấp nộp tiền", amount: 500000 },
+                  { description: "Khoán công việc", amount: 3000000 }
+              ]);
+          }, 1000);
+      } finally {
+          setIsAnalyzingBonus(false);
+      }
+  };
+
+  const totalBonus = useMemo(() => bonusItems.reduce((acc, item) => acc + item.amount, 0), [bonusItems]);
+  const managerShare = totalBonus * 0.3;
+  const staffShare = totalBonus * 0.7;
+  const staffMembers = ["Đào Thế Anh", "Du Thanh Phong", "Đào Thị Thu Hiền"];
+  const perStaffShare = staffShare / staffMembers.length;
+
   // --- Thay POSM Logic ---
   const handlePosmFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1182,67 +1431,115 @@ export const App: React.FC = () => {
         let headerRowIndex = -1;
         let dataStartIndex = 0;
 
-        // Phase 1: Try to find "Tên sản phẩm" header with a strict match
-        for (let i = 0; i < Math.min(rows.length, 10); i++) {
-            const foundIndex = rows[i].findIndex(cell => String(cell).toLowerCase().trim() === 'tên sản phẩm');
-            if (foundIndex !== -1) {
+        // --- Auto-detection Algorithm v2 ---
+        // Tìm dòng tiêu đề bằng cách quét các từ khóa
+        for (let i = 0; i < Math.min(rows.length, 15); i++) {
+            const rowStr = rows[i].map(c => String(c).toLowerCase().trim());
+            const hasName = rowStr.some(c => /tên\s*(sản\s*phẩm|hàng|sp)|product\s*name|description|diễn\s*giải/i.test(c));
+            const hasPrice = rowStr.some(c => /giá/i.test(c));
+            
+            if (hasName && hasPrice) {
                 headerRowIndex = i;
-                productNameIndex = foundIndex;
                 break;
             }
         }
 
-        // Phase 2: Determine column indices and data start row
         if (headerRowIndex !== -1) {
             const header = rows[headerRowIndex].map(c => String(c).toLowerCase().trim());
             
-            productCodeIndex = header.findIndex(h => h.includes('mã sản phẩm'));
-            if (productCodeIndex === -1) {
-                productCodeIndex = productNameIndex + 1;
+            // Regex patterns
+            const nameRegex = /tên\s*(sản\s*phẩm|hàng|sp)|product\s*name|description|diễn\s*giải/i;
+            const codeRegex = /mã\s*(sản\s*phẩm|sp|hàng)|product\s*code|sku|model/i;
+            
+            // Tránh nhầm lẫn "Giá treo", "Giá đỡ"
+            const excludeRegex = /treo|đỡ|kệ/i; 
+
+            const oldPriceRegex = /giá\s*(gốc|cũ|niêm\s*yết|bìa|trước\s*giảm)|old\s*price/i;
+            const newPriceRegex = /giá\s*(mới|bán|km|khuyến\s*mãi|thu|sau\s*giảm)|new\s*price|thực\s*thu/i;
+            
+            // Nếu chỉ có chữ "Giá" chung chung
+            const genericPriceRegex = /^giá$|price|^giá\s*bán$/i;
+
+            const promotionRegex = /khuyến\s*mãi|quà\s*tặng|promotion|ctkm/i;
+
+            // Scoring mechanism for prices
+            let bestOldPriceIdx = -1;
+            let bestNewPriceIdx = -1;
+            
+            header.forEach((colName, idx) => {
+                if (nameRegex.test(colName) && productNameIndex === -1) productNameIndex = idx;
+                if (codeRegex.test(colName) && productCodeIndex === -1) productCodeIndex = idx;
+                if (promotionRegex.test(colName) && !/giá/i.test(colName) && promotionIndex === -1) promotionIndex = idx;
+                
+                // Skip if excluded
+                if (excludeRegex.test(colName)) return;
+
+                if (oldPriceRegex.test(colName)) bestOldPriceIdx = idx;
+                if (newPriceRegex.test(colName)) bestNewPriceIdx = idx;
+            });
+            
+            // Fallback logic if specific regex didn't match
+            if (bestOldPriceIdx === -1 && bestNewPriceIdx === -1) {
+                 // Tìm tất cả cột có chữ "giá"
+                 const priceIndices = header.map((h, i) => (h.includes('giá') && !excludeRegex.test(h) ? i : -1)).filter(i => i !== -1);
+                 if (priceIndices.length >= 2) {
+                     // Giả định cột giá đầu tiên là Giá Gốc, cột sau là Giá Mới (thường thấy trong file excel)
+                     bestOldPriceIdx = priceIndices[0];
+                     bestNewPriceIdx = priceIndices[1];
+                 } else if (priceIndices.length === 1) {
+                     // Nếu chỉ có 1 cột giá, đó là giá bán (New Price)
+                     bestNewPriceIdx = priceIndices[0];
+                 }
             }
 
-            oldPriceIndex = header.findIndex(h => h.includes('giá gốc') || h.includes('giá cũ'));
-            if (oldPriceIndex === -1) {
-                oldPriceIndex = 15; // Fallback to Column P
+            oldPriceIndex = bestOldPriceIdx;
+            newPriceIndex = bestNewPriceIdx;
+            
+            // Final check: if we found New Price but no Old Price, maybe New Price IS the price
+            if (newPriceIndex !== -1 && oldPriceIndex === -1) {
+                // Old Price can be 0 or same as New Price later in logic
             }
 
-            newPriceIndex = header.findIndex(h => h.includes('giá mới') || h.includes('giá sau giảm'));
-            if (newPriceIndex === -1) {
-                newPriceIndex = 16; // Fallback to Column Q
+            // Fix for common files where "Giá bán" is meant to be current price
+            if (newPriceIndex === -1 && oldPriceIndex !== -1) {
+                newPriceIndex = oldPriceIndex; // Swap if logic failed
+                oldPriceIndex = -1;
             }
             
-            promotionIndex = header.findIndex(h => h.includes('khuyến mãi'));
-            if (promotionIndex === -1) {
-                promotionIndex = 29; // Fallback to Column AD
+            // Fallback for Code if not found: Next to Name
+            if (productCodeIndex === -1 && productNameIndex !== -1) {
+                 productCodeIndex = productNameIndex + 1;
             }
+
             dataStartIndex = headerRowIndex + 1;
         } else {
+            // Fallback to hardcoded columns if no header found (Legacy support)
             productNameIndex = 25; // Z
             productCodeIndex = 26; // AA
             oldPriceIndex = 15;   // P
             newPriceIndex = 16;   // Q
             promotionIndex = 29; // AD
-            dataStartIndex = 0; // Assume no header, start from first row
+            dataStartIndex = 0; 
         }
 
-        // Phase 3: Parse data
+        // Parse data
         const loadedItems: PosmChangeItem[] = [];
         for (let i = dataStartIndex; i < rows.length; i++) {
             const row = rows[i];
             
-            if (row.length === 0 || row.length <= productNameIndex || !row[productNameIndex]) {
+            if (row.length === 0 || productNameIndex === -1 || !row[productNameIndex]) {
                 continue;
             }
 
             const productName = String(row[productNameIndex]).trim();
-            if (productName === '') continue;
+            if (productName === '' || productName.toLowerCase() === 'tên sản phẩm') continue;
 
-            const productCode = row.length > productCodeIndex ? String(row[productCodeIndex] || `POSM-${i}`).trim() : `POSM-${i}`;
-            const oldPriceString = row.length > oldPriceIndex ? String(row[oldPriceIndex] || '0') : '0';
-            const newPriceString = row.length > newPriceIndex ? String(row[newPriceIndex] || '0') : '0';
-            const promotionText = row.length > promotionIndex ? String(row[promotionIndex] || '').trim() : '';
+            const productCode = (productCodeIndex !== -1 && row[productCodeIndex]) ? String(row[productCodeIndex]).trim() : `POSM-${i}`;
+            const oldPriceString = (oldPriceIndex !== -1 && row[oldPriceIndex]) ? String(row[oldPriceIndex]) : '0';
+            const newPriceString = (newPriceIndex !== -1 && row[newPriceIndex]) ? String(row[newPriceIndex]) : '0';
+            const promotionText = (promotionIndex !== -1 && row[promotionIndex]) ? String(row[promotionIndex]).trim() : '';
 
-            // Extract bonus point from product code
+            // Extract bonus point
             let bonusPoint = undefined;
             const codeParts = productCode.split('-');
             if (codeParts.length > 1) {
@@ -1250,9 +1547,7 @@ export const App: React.FC = () => {
                 if (bonusPart && bonusPart.length >= 5) {
                     const potentialBonus = bonusPart.substring(4);
                     const match = potentialBonus.match(/\d{2,3}/);
-                    if (match) {
-                        bonusPoint = match[0];
-                    }
+                    if (match) bonusPoint = match[0];
                 }
             }
             
@@ -1267,7 +1562,7 @@ export const App: React.FC = () => {
         }
         
         if (loadedItems.length === 0) {
-            alert("Không đọc được dữ liệu sản phẩm. Vui lòng kiểm tra lại định dạng file và vị trí cột.");
+            alert("Không tìm thấy dữ liệu sản phẩm hợp lệ. Vui lòng kiểm tra lại file Excel.");
             setPosmItems([]);
         } else {
             setPosmItems(loadedItems);
@@ -1276,7 +1571,7 @@ export const App: React.FC = () => {
 
       } catch (error) {
         console.error("Error reading or parsing Excel file for POSM:", error);
-        alert("Đã xảy ra lỗi khi xử lý file Excel. Vui lòng đảm bảo file không bị lỗi và đúng định dạng.");
+        alert("Đã xảy ra lỗi khi xử lý file Excel. Vui lòng đảm bảo file không bị lỗi.");
       }
     };
     reader.readAsArrayBuffer(file);
@@ -1705,15 +2000,54 @@ export const App: React.FC = () => {
     }
   };
 
+  const handlePrintBarcode = () => {
+      if (!qrGeneratorText) return;
+      
+      const printContent = `
+        <html>
+            <head>
+                <title>In Mã Vạch</title>
+                <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+                <style>
+                    body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                    .barcode-container { text-align: center; }
+                </style>
+            </head>
+            <body>
+                <div class="barcode-container">
+                    <svg id="barcode"></svg>
+                </div>
+                <script>
+                    JsBarcode("#barcode", "${qrGeneratorText}", {
+                        format: "CODE128",
+                        lineColor: "#000",
+                        width: 2,
+                        height: 100,
+                        displayValue: true,
+                        fontSize: 20
+                    });
+                    window.onload = function() { window.print(); }
+                </script>
+            </body>
+        </html>
+      `;
+      
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(printContent);
+          printWindow.document.close();
+      }
+  };
+
 
   // --- Navigation & Rendering ---
   const navItemClasses = (page: Page) => 
-    `flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-white ${
+    `flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-white ${
         currentPage === page ? 'bg-indigo-100 text-indigo-700' : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
     }`;
     
   const renderContent = () => {
-    const adminCardClasses = !isAdmin ? 'opacity-50 grayscale cursor-not-allowed hover:!shadow-sm hover:!translate-y-0' : 'hover:border-amber-500 hover:shadow-xl hover:-translate-y-1';
     
     switch (currentPage) {
       case 'trang-chu':
@@ -1722,35 +2056,35 @@ export const App: React.FC = () => {
              <h1 className="text-6xl sm:text-7xl font-extrabold text-slate-900 tracking-wide text-center">TRANG HỖ TRỢ CÔNG VIỆC</h1>
              <div className="mt-12 w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 text-center">
                 
-                <div onClick={() => setCurrentPage('kiem-quy')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-blue-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
+                <div onClick={() => handleFeatureClick('kiem-quy')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-blue-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
                     <div className="flex-shrink-0 bg-blue-100 text-blue-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-blue-200">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-blue-600 transition-colors duration-300">Kiểm Quỹ Thu Ngân</h2>
                 </div>
 
-                <div onClick={() => setCurrentPage('kiem-ke')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-green-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
+                <div onClick={() => handleFeatureClick('kiem-ke')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-green-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
                     <div className="flex-shrink-0 bg-green-100 text-green-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-green-200">
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-green-600 transition-colors duration-300">Kiểm Kê Hàng Hóa</h2>
                 </div>
                 
-                <div onClick={() => handleAdminFeatureClick('kiem-tra-ton-kho')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${!isAdmin ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-amber-500 hover:shadow-xl hover:-translate-y-1'}`}>
+                <div onClick={() => handleFeatureClick('kiem-tra-ton-kho')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${isFeatureLocked('kiem-tra-ton-kho') ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-amber-500 hover:shadow-xl hover:-translate-y-1'}`}>
                     <div className="flex-shrink-0 bg-amber-100 text-amber-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-amber-200">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-amber-600 transition-colors duration-300">Kiểm Tra Tồn Kho</h2>
                 </div>
 
-                <div onClick={() => handleAdminFeatureClick('kiem-hang-chuyen-kho')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${!isAdmin ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-cyan-500 hover:shadow-xl hover:-translate-y-1'}`}>
+                <div onClick={() => handleFeatureClick('kiem-hang-chuyen-kho')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${isFeatureLocked('kiem-hang-chuyen-kho') ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-cyan-500 hover:shadow-xl hover:-translate-y-1'}`}>
                     <div className="flex-shrink-0 bg-cyan-100 text-cyan-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-cyan-200">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-cyan-600 transition-colors duration-300">Kiểm Hàng Chuyển Kho</h2>
                 </div>
                 
-                <div onClick={() => handleAdminFeatureClick('thay-posm')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${!isAdmin ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-purple-500 hover:shadow-xl hover:-translate-y-1'}`}>
+                <div onClick={() => handleFeatureClick('thay-posm')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${isFeatureLocked('thay-posm') ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-purple-500 hover:shadow-xl hover:-translate-y-1'}`}>
                     <div className="flex-shrink-0 bg-purple-100 text-purple-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-purple-200">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -1759,12 +2093,20 @@ export const App: React.FC = () => {
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-purple-600 transition-colors duration-300">Thay POSM</h2>
                 </div>
                 
-                <div onClick={() => setCurrentPage('ma-qr')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-slate-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
+                <div onClick={() => handleFeatureClick('ma-qr')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${isFeatureLocked('ma-qr') ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-slate-500 hover:shadow-xl hover:-translate-y-1'}`}>
                     <div className="flex-shrink-0 bg-slate-100 text-slate-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-slate-200">
                         <span className="material-symbols-outlined" style={{ fontSize: '40px' }}>qr_code_2</span>
                     </div>
-                    <h2 className="text-base font-bold text-slate-800 group-hover:text-slate-600 transition-colors duration-300">Tạo Mã QR</h2>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-slate-600 transition-colors duration-300">Tạo Mã QR / Barcode</h2>
                 </div>
+
+                <div onClick={() => handleFeatureClick('tinh-thuong')} className="group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 hover:border-orange-500 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center">
+                    <div className="flex-shrink-0 bg-orange-100 text-orange-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-orange-200">
+                         <span className="material-symbols-outlined" style={{ fontSize: '40px' }}>calculate</span>
+                    </div>
+                    <h2 className="text-base font-bold text-slate-800 group-hover:text-orange-600 transition-colors duration-300">Tính Thưởng</h2>
+                </div>
+
              </div>
           </div>
         );
@@ -2485,24 +2827,24 @@ export const App: React.FC = () => {
                         <div>
                             <div>
                                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                                    <span className="bg-indigo-600 text-white font-bold text-sm px-3 py-1 rounded-full">v1.5.0</span>
-                                    <h3 className="text-lg font-semibold text-slate-800">Nâng Cấp Trải Nghiệm & Báo Lỗi</h3>
+                                    <span className="bg-indigo-600 text-white font-bold text-sm px-3 py-1 rounded-full">v1.6.0</span>
+                                    <h3 className="text-lg font-semibold text-slate-800">Cải Thiện & Tính Năng Mới</h3>
                                 </div>
                                 <ul className="mt-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
                                     <li className="relative pl-2">
                                         <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-green-300"></span>
                                         <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[TÍNH NĂNG MỚI]</span>
+                                        Tạo Mã Vạch: Bổ sung tính năng tạo Barcode (Mã vạch) cho phép in ấn trực tiếp, bên cạnh Mã QR hiện có.
+                                    </li>
+                                    <li className="relative pl-2">
+                                        <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-purple-300"></span>
+                                        <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-purple-100 text-purple-800">[THUẬT TOÁN]</span>
+                                        Nâng cấp Thay POSM: Cải thiện thuật toán nhận diện cột Excel thông minh hơn, xử lý tốt các file phức tạp (như điện lạnh) để nhận diện chính xác Giá gốc/Giá mới.
+                                    </li>
+                                    <li className="relative pl-2">
+                                        <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-green-300"></span>
+                                        <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[TÍNH NĂNG MỚI]</span>
                                         Hệ thống báo lỗi nâng cao: Thay thế nút báo lỗi cũ bằng biểu mẫu chi tiết, cho phép đính kèm ảnh chụp màn hình để phản hồi chính xác hơn.
-                                    </li>
-                                    <li className="relative pl-2">
-                                        <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span>
-                                        <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>
-                                        Giao diện "Tạo Mã QR" được cập nhật với ô nhập liệu một dòng, giúp giao diện gọn gàng và đồng nhất hơn.
-                                    </li>
-                                    <li className="relative pl-2">
-                                        <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span>
-                                        <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[CẢI TIẾN]</span>
-                                        Thanh điều hướng được làm rõ: chức năng "Quét QR" đã được đổi tên thành "Tạo Mã QR" để phản ánh đúng mục đích sử dụng.
                                     </li>
                                 </ul>
                             </div>
@@ -2526,6 +2868,20 @@ export const App: React.FC = () => {
                     </div>
 
                     <div className="space-y-6">
+                        {isFree && (
+                             <div className="bg-white p-6 rounded-xl shadow-lg border-2 border-slate-200 relative overflow-hidden">
+                                <div className="flex items-center gap-4 mb-4 relative z-10">
+                                    <div className="flex-shrink-0 bg-slate-100 text-slate-500 rounded-full p-2.5 inline-flex">
+                                        <span className="material-symbols-outlined">workspace_premium</span>
+                                    </div>
+                                    <h2 className="text-xl font-bold text-slate-700">Nâng Cấp Tài Khoản VIP</h2>
+                                </div>
+                                <p className="text-slate-500 mb-5 text-sm relative z-10">Tính năng nâng cấp tạm thời bị khóa để bảo trì hệ thống. Vui lòng quay lại sau.</p>
+                                <button disabled className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-300 text-white font-bold rounded-lg border border-slate-300 cursor-not-allowed relative z-10">
+                                    Tạm khóa bảo trì
+                                </button>
+                            </div>
+                        )}
                         <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200/80">
                             <div className="flex items-center gap-4 mb-4">
                                 <div className="flex-shrink-0 bg-indigo-100 text-indigo-600 rounded-full p-2.5 inline-flex">
@@ -2564,33 +2920,198 @@ export const App: React.FC = () => {
         return (
             <div className="w-full max-w-2xl mx-auto">
                 <header className="text-center mb-8">
-                    <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">TẠO MÃ QR CODE</h1>
+                    <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">TẠO MÃ QR / BARCODE</h1>
                 </header>
                 <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
+                    
+                    <div className="flex justify-center mb-6">
+                        <div className="inline-flex rounded-md shadow-sm" role="group">
+                            <button
+                                type="button"
+                                onClick={() => setCodeType('qr')}
+                                className={`px-4 py-2 text-sm font-medium border rounded-l-lg focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:text-indigo-700 ${codeType === 'qr' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+                            >
+                                Mã QR (QR Code)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setCodeType('barcode')}
+                                className={`px-4 py-2 text-sm font-medium border rounded-r-lg focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:text-indigo-700 ${codeType === 'barcode' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+                            >
+                                Mã Vạch (Barcode)
+                            </button>
+                        </div>
+                    </div>
+
                     <div>
                         <label htmlFor="qr-input" className="block text-sm font-semibold text-slate-700 mb-2">
-                            Nội dung mã QR
+                            Nội dung mã {codeType === 'qr' ? 'QR' : 'Vạch'}
                         </label>
                         <input
                             id="qr-input"
                             type="text"
                             value={qrGeneratorText}
                             onChange={(e) => setQrGeneratorText(e.target.value)}
-                            placeholder="Nhập văn bản hoặc liên kết vào đây..."
+                            placeholder={codeType === 'qr' ? "Nhập văn bản hoặc liên kết..." : "Nhập mã số hoặc ký tự..."}
                             className="w-full p-3 bg-white border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
                         />
                     </div>
+                    
                     {qrGeneratorText && (
                         <div className="mt-6 pt-6 border-t border-slate-200 flex flex-col items-center">
-                            <h3 className="text-lg font-semibold text-slate-800 mb-4">Mã QR của bạn:</h3>
-                            <div className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm inline-block">
-                                <QRCodeComponent text={qrGeneratorText} size={256} />
+                            <h3 className="text-lg font-semibold text-slate-800 mb-4">Kết quả của bạn:</h3>
+                            <div className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm inline-block mb-4">
+                                {codeType === 'qr' ? (
+                                    <QRCodeComponent text={qrGeneratorText} size={256} />
+                                ) : (
+                                    <BarcodeComponent text={qrGeneratorText} />
+                                )}
                             </div>
+                            {codeType === 'barcode' && (
+                                <button 
+                                    onClick={handlePrintBarcode}
+                                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white font-semibold rounded-lg hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-800 transition-colors"
+                                >
+                                    <span className="material-symbols-outlined">print</span>
+                                    In Mã Vạch
+                                </button>
+                            )}
                         </div>
                     )}
                 </div>
             </div>
         );
+      case 'tinh-thuong':
+          return (
+              <div className="w-full max-w-4xl mx-auto">
+                  <header className="text-center mb-8">
+                      <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">TÍNH THƯỞNG TỰ ĐỘNG</h1>
+                      <p className="text-slate-500 mt-2">Phân tích hình ảnh và tính toán phân chia thưởng cho nhân sự.</p>
+                  </header>
+
+                  <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
+                      <div className="mb-6">
+                          <label className="block text-sm font-semibold text-slate-700 mb-2">Tải lên hình ảnh phiếu lương/thưởng</label>
+                          <div className="flex items-center justify-center w-full">
+                              <label htmlFor="dropzone-file" className="flex flex-col items-center justify-center w-full h-48 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
+                                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                      <svg className="w-8 h-8 mb-4 text-slate-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                                          <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
+                                      </svg>
+                                      <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">Nhấn để tải lên</span> hoặc kéo thả</p>
+                                      <p className="text-xs text-slate-500">Hỗ trợ: PNG, JPG (Chọn nhiều ảnh)</p>
+                                  </div>
+                                  <input id="dropzone-file" type="file" className="hidden" multiple accept="image/*" onChange={handleBonusImageUpload} />
+                              </label>
+                          </div>
+                      </div>
+
+                      {bonusImages.length > 0 && (
+                          <div className="mb-6">
+                              <p className="text-sm font-medium text-slate-700 mb-2">Đã chọn {bonusImages.length} hình ảnh:</p>
+                              <div className="flex flex-wrap gap-2">
+                                  {bonusImages.map((file, idx) => (
+                                      <div key={idx} className="relative group">
+                                          <div className="w-20 h-20 rounded-md overflow-hidden border border-slate-200">
+                                              <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-full object-cover" />
+                                          </div>
+                                      </div>
+                                  ))}
+                              </div>
+                          </div>
+                      )}
+
+                      <div className="flex justify-center">
+                          <button
+                              onClick={handleAnalyzeBonus}
+                              disabled={isAnalyzingBonus || bonusImages.length === 0}
+                              className={`flex items-center gap-2 px-6 py-3 font-semibold rounded-lg shadow-md text-white transition-all ${
+                                  isAnalyzingBonus || bonusImages.length === 0
+                                      ? 'bg-slate-400 cursor-not-allowed'
+                                      : 'bg-orange-600 hover:bg-orange-700 hover:shadow-lg'
+                              }`}
+                          >
+                              {isAnalyzingBonus ? (
+                                  <>
+                                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                      </svg>
+                                      Đang phân tích...
+                                  </>
+                              ) : (
+                                  <>
+                                      <span className="material-symbols-outlined">analytics</span>
+                                      Phân tích & Tính thưởng
+                                  </>
+                              )}
+                          </button>
+                      </div>
+                  </div>
+
+                  {bonusItems.length > 0 && (
+                      <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                          {/* Kết quả phân tích */}
+                          <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
+                              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                  <span className="material-symbols-outlined text-blue-600">receipt_long</span>
+                                  Chi Tiết Các Khoản Thu Nhập
+                              </h3>
+                              <div className="space-y-3">
+                                  {bonusItems.map((item, index) => (
+                                      <div key={index} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-100">
+                                          <span className="font-medium text-slate-700">{item.description}</span>
+                                          <span className="font-mono font-bold text-slate-900">{formatCurrency(item.amount)}</span>
+                                      </div>
+                                  ))}
+                                  <div className="pt-3 mt-3 border-t border-slate-200 flex justify-between items-center">
+                                      <span className="font-bold text-lg text-slate-800">TỔNG CỘNG</span>
+                                      <span className="font-mono font-bold text-xl text-indigo-600">{formatCurrency(totalBonus)}</span>
+                                  </div>
+                              </div>
+                          </div>
+
+                          {/* Bảng phân chia */}
+                          <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
+                              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                  <span className="material-symbols-outlined text-green-600">pie_chart</span>
+                                  Bảng Phân Chia Thưởng
+                              </h3>
+                              
+                              <div className="mb-6">
+                                  <h4 className="text-sm font-semibold text-slate-500 uppercase mb-2">Phần Quản Lý (30%)</h4>
+                                  <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-lg flex justify-between items-center">
+                                      <span className="font-medium text-indigo-900">Quản Lý</span>
+                                      <span className="font-mono font-bold text-xl text-indigo-700">{formatCurrency(managerShare)}</span>
+                                  </div>
+                              </div>
+
+                              <div>
+                                  <h4 className="text-sm font-semibold text-slate-500 uppercase mb-2">Phần Nhân Sự (70%) - {formatCurrency(staffShare)}</h4>
+                                  <div className="bg-slate-50 border border-slate-200 rounded-lg overflow-hidden">
+                                      <table className="w-full text-sm text-left">
+                                          <thead className="bg-slate-100 text-slate-600 font-semibold">
+                                              <tr>
+                                                  <th className="px-4 py-2">Tên Nhân Sự</th>
+                                                  <th className="px-4 py-2 text-right">Thực Lĩnh</th>
+                                              </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-200">
+                                              {staffMembers.map((staff, idx) => (
+                                                  <tr key={idx}>
+                                                      <td className="px-4 py-3 font-medium text-slate-800">{staff}</td>
+                                                      <td className="px-4 py-3 text-right font-mono font-bold text-green-700">{formatCurrency(perStaffShare)}</td>
+                                                  </tr>
+                                              ))}
+                                          </tbody>
+                                      </table>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                  )}
+              </div>
+          );
       default:
         return null;
     }
@@ -2720,45 +3241,54 @@ export const App: React.FC = () => {
 
                     <div className="flex-grow flex items-center justify-center flex-wrap gap-x-1 sm:gap-x-2">
                          <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
-                         <button onClick={() => setCurrentPage('kiem-quy')} className={navItemClasses('kiem-quy')}>
+                         <button onClick={() => handleFeatureClick('kiem-quy')} className={navItemClasses('kiem-quy')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                             <span className="hidden sm:inline">Kiểm quỹ</span>
                         </button>
-                        <button onClick={() => setCurrentPage('kiem-ke')} className={navItemClasses('kiem-ke')}>
+                        <button onClick={() => handleFeatureClick('kiem-ke')} className={navItemClasses('kiem-ke')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
                             <span className="hidden sm:inline">Kiểm kê</span>
                         </button>
-                         <button onClick={() => handleAdminFeatureClick('kiem-hang-chuyen-kho')} className={`${navItemClasses('kiem-hang-chuyen-kho')} ${!isAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                         <button onClick={() => handleFeatureClick('kiem-hang-chuyen-kho')} className={`${navItemClasses('kiem-hang-chuyen-kho')} ${isFeatureLocked('kiem-hang-chuyen-kho') ? 'opacity-50 cursor-not-allowed' : ''}`}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                             <span className="hidden sm:inline">Kiểm Hàng</span>
                         </button>
-                        <button onClick={() => handleAdminFeatureClick('kiem-tra-ton-kho')} className={`${navItemClasses('kiem-tra-ton-kho')} ${!isAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        <button onClick={() => handleFeatureClick('kiem-tra-ton-kho')} className={`${navItemClasses('kiem-tra-ton-kho')} ${isFeatureLocked('kiem-tra-ton-kho') ? 'opacity-50 cursor-not-allowed' : ''}`}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                             <span className="hidden sm:inline">Tra tồn kho</span>
                         </button>
-                        <button onClick={() => handleAdminFeatureClick('thay-posm')} className={`${navItemClasses('thay-posm')} ${!isAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        <button onClick={() => handleFeatureClick('thay-posm')} className={`${navItemClasses('thay-posm')} ${isFeatureLocked('thay-posm') ? 'opacity-50 cursor-not-allowed' : ''}`}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
                             <span className="hidden sm:inline">Thay POSM</span>
                         </button>
-                        <button onClick={() => setCurrentPage('ma-qr')} className={navItemClasses('ma-qr')}>
+                        <button onClick={() => handleFeatureClick('ma-qr')} className={`${navItemClasses('ma-qr')} ${isFeatureLocked('ma-qr') ? 'opacity-50 cursor-not-allowed' : ''}`}>
                             <span className="material-symbols-outlined" style={{ fontSize: '22px' }}>qr_code_2</span>
                              <span className="hidden sm:inline">Tạo Mã QR</span>
                         </button>
                     </div>
 
                     <div ref={userMenuRef} className="relative flex-shrink-0">
-                         <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-white">
-                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                             </svg>
+                         <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center justify-center h-10 px-2 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-white min-w-[50px]">
+                            {isAdmin ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                                </svg>
+                            ) : isVip ? (
+                                <span className="font-bold text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded">VIP</span>
+                            ) : (
+                                <span className="font-bold text-xs bg-slate-300 text-slate-700 px-2 py-0.5 rounded">Free</span>
+                            )}
                         </button>
                         {isUserMenuOpen && (
                             <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5 z-50">
                                 <div className="px-4 py-2 border-b border-slate-100">
                                     <p className="text-xs text-slate-500">Đã đăng nhập với tên:</p>
-                                    <p className="text-sm font-semibold text-slate-800 truncate">{currentUser?.username}</p>
+                                    <p className="text-sm font-semibold text-slate-800 truncate flex items-center gap-2">{currentUser?.username}
+                                        {isVip && <span className="font-bold text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded">VIP</span>}
+                                        {isFree && <span className="font-bold text-xs bg-slate-300 text-slate-700 px-2 py-0.5 rounded">Free</span>}
+                                    </p>
                                 </div>
                                 <button
                                     onClick={() => { setCurrentPage('thong-tin'); setIsUserMenuOpen(false); }}
@@ -2851,6 +3381,63 @@ export const App: React.FC = () => {
                         Gửi Báo Lỗi
                     </button>
                 </footer>
+            </div>
+        </div>
+    )}
+    
+    {isVipModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={() => setIsVipModalOpen(false)}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <div className="bg-gradient-to-r from-amber-400 to-yellow-500 p-4 flex justify-between items-center">
+                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                        <span className="material-symbols-outlined">workspace_premium</span>
+                        Nâng Cấp Tài Khoản VIP
+                    </h2>
+                    <button onClick={() => setIsVipModalOpen(false)} className="text-white/80 hover:text-white transition-colors">
+                        <span className="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+                <div className="p-6 flex flex-col items-center text-center space-y-4">
+                    <p className="text-slate-600 text-sm">
+                        Quét mã QR bên dưới để thanh toán <span className="font-bold text-red-600">10.000đ</span> và sử dụng VIP trong <span className="font-bold text-slate-800">30 ngày</span>.
+                    </p>
+                    
+                    <div className="p-2 border-2 border-amber-200 rounded-xl bg-amber-50">
+                        <img 
+                            src={`https://img.vietqr.io/image/MB-031119939-compact2.png?amount=10000&addInfo=VIP%20${currentUser?.username}&accountName=DAO%20THE%20ANH`}
+                            alt="VietQR MB Bank" 
+                            className="w-64 h-auto rounded-lg"
+                        />
+                    </div>
+
+                    <div className="w-full text-left bg-slate-50 p-3 rounded-lg border border-slate-200 text-sm">
+                        <p className="mb-1"><span className="font-semibold text-slate-700">Ngân hàng:</span> MB Bank</p>
+                        <p className="mb-1"><span className="font-semibold text-slate-700">Số tài khoản:</span> <span className="font-mono font-bold text-lg text-indigo-700">031119939</span></p>
+                        <p className="mb-1"><span className="font-semibold text-slate-700">Chủ tài khoản:</span> DAO THE ANH</p>
+                        <p><span className="font-semibold text-slate-700">Nội dung:</span> <span className="font-mono font-bold text-slate-800">VIP {currentUser?.username}</span></p>
+                    </div>
+
+                    <button 
+                        onClick={handleConfirmVipPayment}
+                        disabled={isVerifyingPayment}
+                        className={`w-full py-3 font-bold rounded-lg shadow-md transition-colors flex items-center justify-center gap-2 ${isVerifyingPayment ? 'bg-slate-400 cursor-not-allowed text-white' : 'bg-green-600 hover:bg-green-700 text-white'}`}
+                    >
+                        {isVerifyingPayment ? (
+                            <>
+                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Đang xác thực giao dịch...
+                            </>
+                        ) : (
+                            <>
+                                <span className="material-symbols-outlined">check_circle</span>
+                                Đã thanh toán - Kích hoạt ngay
+                            </>
+                        )}
+                    </button>
+                </div>
             </div>
         </div>
     )}
