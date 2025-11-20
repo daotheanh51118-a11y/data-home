@@ -1324,15 +1324,14 @@ export const App: React.FC = () => {
       setExcludedBonusIndices([]); // Reset excluded items
 
       try {
-          // Assuming process.env.API_KEY is available as per instructions
-          // In a real app, user might need to provide this or it's in env
-          const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+          // Sử dụng process.env.API_KEY theo quy chuẩn
+          const API_KEY = process.env.API_KEY;
           
-          if (!apiKey) {
+          if (!API_KEY) {
               throw new Error("API Key not configured");
           }
 
-          const ai = new GoogleGenAI({ apiKey: apiKey });
+          const ai = new GoogleGenAI({ apiKey: API_KEY });
           
           const imageParts = await Promise.all(
               bonusImages.map(file => fileToGenerativePart(file))
