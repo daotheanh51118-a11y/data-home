@@ -1318,50 +1318,53 @@ export const App: React.FC = () => {
       setExcludedBonusIndices([]);
 
       const allFoundItems: BonusItem[] = [];
-
-      // A set of keywords to validate if a line is a bonus/allowance item
       const validationKeywords = [/thưởng/i, /trợ\s*cấp/i, /khoán/i, /pc/i, /kpi/i, /incentive/i, /phụ\s*cấp/i, /lương/i];
 
       const parseTextForBonuses = (text: string) => {
-          const lines = text.split('\n');
-          lines.forEach(line => {
-              const cleanedLine = line.trim();
-              if (cleanedLine.length < 5) return; // Ignore very short/empty lines
+          // Regex to find all numbers that look like currency (e.g., 1.000.000 or 100,000)
+          // It handles dots, commas, and even spaces as thousand separators.
+          const currencyRegex = /(\d{1,3}(?:[.,\s]\d{3})*)/g;
 
-              // Regex to find all numbers that look like currency (e.g., 1.000.000 or 100,000)
-              const currencyRegex = /(\d{1,3}(?:[.,]\d{3})*)/g;
-              const matches = [...cleanedLine.matchAll(currencyRegex)];
+          // Find all potential amounts and their positions (indices) in the full text.
+          const matches = [...text.matchAll(currencyRegex)];
 
-              if (matches.length > 0) {
-                  // Assume the LAST number found on the line is the relevant amount
-                  const lastMatch = matches[matches.length - 1];
-                  const amountString = lastMatch[0];
-                  const amount = parseInt(amountString.replace(/[.,]/g, ''), 10);
+          // Filter out numbers that are unlikely to be currency values (e.g., small numbers, years).
+          const plausibleMatches = matches.filter(match => {
+              const amount = parseInt(match[0].replace(/[.,\s]/g, ''), 10);
+              return !isNaN(amount) && amount >= 1000;
+          });
 
-                  // The index where the amount string starts
-                  const amountIndex = lastMatch.index!;
+          if (plausibleMatches.length === 0) return;
 
-                  // Validate the parsed amount is a reasonable value for a bonus
-                  if (!isNaN(amount) && amount >= 1000) {
-                      // The description is the full line with the last occurrence of the amount string removed.
-                      // This preserves all original text, including notes or details.
-                      const fullDescription = (
-                          cleanedLine.substring(0, amountIndex) + 
-                          cleanedLine.substring(amountIndex + amountString.length)
-                      ).trim().replace(/\s\s+/g, ' '); // Clean up extra spaces
+          let lastIndex = 0;
 
-                      // Check if the resulting description is meaningful and contains a keyword
-                      if (fullDescription.length > 2 && validationKeywords.some(kw => kw.test(fullDescription))) {
-                          allFoundItems.push({ 
-                              description: fullDescription,
-                              amount 
-                          });
-                      }
-                  }
+          // Iterate through the plausible currency matches to determine the description for each.
+          plausibleMatches.forEach(match => {
+              const amountString = match[0];
+              const amount = parseInt(amountString.replace(/[.,\s]/g, ''), 10);
+              
+              // The description is the text between the end of the last amount and the start of this one.
+              const descriptionEndIndex = match.index!;
+              let rawDescription = text.substring(lastIndex, descriptionEndIndex);
+
+              // Update lastIndex for the next iteration to the end of the current amount string.
+              lastIndex = descriptionEndIndex + amountString.length;
+
+              // Clean up the extracted description text.
+              const cleanedDescription = rawDescription
+                  .replace(/\n/g, ' ') // Replace newlines with spaces to join multi-line descriptions.
+                  .replace(/\s+/g, ' ') // Collapse multiple spaces into one.
+                  .trim();
+              
+              // Validate the cleaned description to ensure it's meaningful.
+              if (cleanedDescription.length > 2 && validationKeywords.some(kw => kw.test(cleanedDescription))) {
+                  allFoundItems.push({
+                      description: cleanedDescription,
+                      amount: amount
+                  });
               }
           });
       };
-
 
       try {
           const worker = await window.Tesseract.createWorker('vie', 1, {
@@ -3524,4 +3527,65 @@ export const App: React.FC = () => {
                     <div className="p-2 border-2 border-amber-200 rounded-xl bg-amber-50">
                         <img 
                             src={`https://img.vietqr.io/image/MB-031119939-compact2.png?amount=10000&addInfo=VIP%20${currentUser?.username}&accountName=DAO%20THE%20ANH`}
-                            alt="VietQR MB
+                            alt="VietQR MBBank" 
+                            width="256" 
+                            height="256"
+                            className="rounded-lg"
+                        />
+                    </div>
+
+                    <div className="w-full text-left bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
+                        <p className="font-semibold text-slate-800">Chủ tài khoản: DAO THE ANH</p>
+                        <p className="font-semibold text-slate-800">Ngân hàng: MB Bank</p>
+                        <p className="font-semibold text-slate-800">Nội dung CK: <span className="font-mono text-red-600">VIP {currentUser?.username}</span></p>
+                    </div>
+
+                    <button
+                        onClick={handleConfirmVipPayment}
+                        disabled={isVerifyingPayment}
+                        className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 font-bold rounded-lg transition-colors text-white ${
+                            isVerifyingPayment
+                                ? 'bg-slate-400 cursor-wait'
+                                : 'bg-green-600 hover:bg-green-700'
+                        }`}
+                    >
+                        {isVerifyingPayment ? (
+                            <>
+                                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                <span>Đang xác thực giao dịch...</span>
+                            </>
+                        ) : (
+                            <>
+                                <span className="material-symbols-outlined">verified</span>
+                                <span>Đã thanh toán - Kích hoạt ngay</span>
+                            </>
+                        )}
+                    </button>
+
+                    <p className="text-xs text-slate-500">
+                        Sau khi thanh toán thành công, nhấn nút trên để kích hoạt. 
+                        Nếu gặp sự cố, vui lòng liên hệ hỗ trợ.
+                    </p>
+                </div>
+            </div>
+        </div>
+    )}
+
+    {qrModalData && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={() => setQrModalData(null)}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-xs flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <header className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                    <h3 className="font-bold text-slate-800">QR thanh toán cho {qrModalData.name}</h3>
+                    <button onClick={() => setQrModalData(null)} className="text-slate-500 hover:text-slate-800 transition-colors">
+                        <span className="material-symbols-outlined">close</span>
+                    </button>
+                </header>
+                <div className="p-6 flex justify-center">
+                    <img src={qrModalData.qrLink} alt={`QR Code for ${qrModalData.name}`} className="w-full h-auto rounded-lg border border-slate-200" />
+                </div>
+            </div>
+        </div>
+    )}
+    </div>
+  );
+};
