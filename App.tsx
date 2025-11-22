@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
 
 // --- Type Declarations ---
 declare global {
@@ -7,6 +6,7 @@ declare global {
     XLSX: any;
     QRCode: any;
     JsBarcode: any;
+    Tesseract: any;
   }
 }
 
@@ -169,19 +169,6 @@ const getIconSvg = (category: string, className: string = "") => {
     // Using `vertical-align: middle` to better align font icons with text.
     return `<span class="material-symbols-outlined ${className}" style="vertical-align: middle;">${iconName}</span>`;
 };
-
-// Convert File to Base64 for Gemini
-async function fileToGenerativePart(file: File): Promise<{ inlineData: { data: string; mimeType: string } }> {
-    const base64EncodedDataPromise = new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-        reader.readAsDataURL(file);
-    });
-    return {
-        inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
-    };
-}
-
 
 // --- Reusable Components ---
 const StatCard: React.FC<{ title: string; value: string | number; className?: string; }> = ({ title, value, className }) => (
@@ -359,9 +346,12 @@ export const App: React.FC = () => {
   const [bonusImages, setBonusImages] = useState<File[]>([]);
   const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
   const [isAnalyzingBonus, setIsAnalyzingBonus] = useState<boolean>(false);
+  const [bonusAnalysisProgress, setBonusAnalysisProgress] = useState<{ status: string; progress: number } | null>(null);
   const [excludedBonusIndices, setExcludedBonusIndices] = useState<number[]>([]);
-  const [isBonusFilterMode, setIsBonusFilterMode] = useState<boolean>(false);
+  const [isBonusFilterDropdownOpen, setIsBonusFilterDropdownOpen] = useState(false);
+  const bonusFilterDropdownRef = useRef<HTMLDivElement>(null);
   const [bonusDeduction, setBonusDeduction] = useState<number>(0);
+  const [qrModalData, setQrModalData] = useState<{ name: string; qrLink: string; } | null>(null);
 
   // State for Bug Report Modal
   const [isBugReportOpen, setIsBugReportOpen] = useState<boolean>(false);
@@ -548,6 +538,9 @@ export const App: React.FC = () => {
       }
       if (featureMenuRef.current && !featureMenuRef.current.contains(event.target as Node)) {
         setIsFeatureMenuOpen(false);
+      }
+      if (bonusFilterDropdownRef.current && !bonusFilterDropdownRef.current.contains(event.target as Node)) {
+        setIsBonusFilterDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -1320,90 +1313,84 @@ export const App: React.FC = () => {
       }
 
       setIsAnalyzingBonus(true);
+      setBonusAnalysisProgress({ status: 'Khởi tạo...', progress: 0 });
       setBonusItems([]);
-      setExcludedBonusIndices([]); // Reset excluded items
+      setExcludedBonusIndices([]);
 
-      try {
-          // Sử dụng process.env.API_KEY theo quy chuẩn
-          const API_KEY = process.env.API_KEY;
-          
-          if (!API_KEY) {
-              throw new Error("API Key not configured");
-          }
+      const allFoundItems: BonusItem[] = [];
 
-          const ai = new GoogleGenAI({ apiKey: API_KEY });
-          
-          const imageParts = await Promise.all(
-              bonusImages.map(file => fileToGenerativePart(file))
-          );
+      // A set of keywords to validate if a line is a bonus/allowance item
+      const validationKeywords = [/thưởng/i, /trợ\s*cấp/i, /khoán/i, /pc/i, /kpi/i, /incentive/i, /phụ\s*cấp/i, /lương/i];
 
-          const prompt = `
-              Bạn là một trợ lý kế toán chuyên nghiệp. Nhiệm vụ của bạn là trích xuất chính xác số tiền từ hình ảnh bảng lương/thưởng cho các mục tiêu cụ thể sau:
-              1. "Thưởng thi đua" (hoặc các biến thể như: Tiền thưởng thi đua, Thưởng doanh số, Incentive...)
-              2. "Trợ cấp nộp tiền" (hoặc các biến thể như: Phụ cấp nộp tiền, Tiền nộp tiền...) 
-              3. "Khoán công việc" (hoặc các biến thể như: Lương khoán, Tiền khoán, Khoán...)
-              
-              YÊU CẦU QUAN TRỌNG:
-              - Tìm kiếm tất cả các mục khớp với từ khóa trên trong các hình ảnh.
-              - Số tiền ("amount") phải được chuyển đổi thành số nguyên (Integer), loại bỏ mọi dấu chấm phân cách hàng nghìn, dấu phẩy hoặc ký hiệu tiền tệ (Ví dụ: "1.000.000" -> 1000000).
-              - Nếu một mục xuất hiện nhiều lần (ví dụ nhiều dòng "Khoán công việc"), hãy liệt kê tất cả chúng thành các item riêng biệt.
-              - Tuyệt đối KHÔNG tự tính tổng. Hãy trả về từng mục tìm thấy.
-              - Nếu không tìm thấy mục nào, trả về danh sách rỗng.
+      const parseTextForBonuses = (text: string) => {
+          const lines = text.split('\n');
+          lines.forEach(line => {
+              const cleanedLine = line.trim();
+              if (cleanedLine.length < 5) return; // Ignore very short/empty lines
 
-              Trả về kết quả dưới dạng JSON.
-          `;
+              // Regex to find all numbers that look like currency (e.g., 1.000.000 or 100,000)
+              const currencyRegex = /(\d{1,3}(?:[.,]\d{3})*)/g;
+              const matches = [...cleanedLine.matchAll(currencyRegex)];
 
-          // Updated to usage of generateContent with proper structure for mix of text and image
-          const result = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
-              contents: {
-                  parts: [
-                      { text: prompt },
-                      ...imageParts
-                  ]
-              },
-              config: {
-                  responseMimeType: "application/json",
-                  responseSchema: {
-                      type: Type.OBJECT,
-                      properties: {
-                          items: {
-                              type: Type.ARRAY,
-                              items: {
-                                  type: Type.OBJECT,
-                                  properties: {
-                                      description: { type: Type.STRING },
-                                      amount: { type: Type.NUMBER }
-                                  }
-                              }
-                          }
+              if (matches.length > 0) {
+                  // Assume the LAST number found on the line is the relevant amount
+                  const lastMatch = matches[matches.length - 1];
+                  const amountString = lastMatch[0];
+                  const amount = parseInt(amountString.replace(/[.,]/g, ''), 10);
+
+                  // The index where the amount string starts
+                  const amountIndex = lastMatch.index!;
+
+                  // Validate the parsed amount is a reasonable value for a bonus
+                  if (!isNaN(amount) && amount >= 1000) {
+                      // The description is the full line with the last occurrence of the amount string removed.
+                      // This preserves all original text, including notes or details.
+                      const fullDescription = (
+                          cleanedLine.substring(0, amountIndex) + 
+                          cleanedLine.substring(amountIndex + amountString.length)
+                      ).trim().replace(/\s\s+/g, ' '); // Clean up extra spaces
+
+                      // Check if the resulting description is meaningful and contains a keyword
+                      if (fullDescription.length > 2 && validationKeywords.some(kw => kw.test(fullDescription))) {
+                          allFoundItems.push({ 
+                              description: fullDescription,
+                              amount 
+                          });
                       }
                   }
               }
           });
+      };
 
-          const responseText = result.text;
-          if (!responseText) throw new Error("No response text");
-          const parsedData = JSON.parse(responseText);
-          
-          if (parsedData && parsedData.items) {
-              setBonusItems(parsedData.items);
+
+      try {
+          const worker = await window.Tesseract.createWorker('vie', 1, {
+              logger: (m: any) => {
+                  if (m.status === 'recognizing text') {
+                      setBonusAnalysisProgress(prev => ({ ...(prev!), progress: Math.round(m.progress * 100) }));
+                  }
+              }
+          });
+
+          for (let i = 0; i < bonusImages.length; i++) {
+              const file = bonusImages[i];
+              setBonusAnalysisProgress({ status: `Xử lý ảnh ${i + 1}/${bonusImages.length}`, progress: 0 });
+              const { data: { text } } = await worker.recognize(file);
+              parseTextForBonuses(text);
+          }
+
+          await worker.terminate();
+          setBonusItems(allFoundItems);
+          if(allFoundItems.length === 0){
+               alert("Không tìm thấy khoản thưởng nào hợp lệ trong ảnh. Vui lòng kiểm tra lại hình ảnh hoặc thử với ảnh rõ nét hơn.");
           }
 
       } catch (error) {
-          console.error("Bonus Analysis Error:", error);
-          // FALLBACK MOCK DATA FOR DEMO PURPOSES (Since API Key might be missing in browser env)
-          // Giả lập dữ liệu để người dùng thấy được logic tính toán 30/70
-          console.log("Switching to mock data for demonstration.");
-          setTimeout(() => {
-              setBonusItems([
-                  { description: "Thưởng thi đua", amount: 2000000 },
-                  { description: "Trợ cấp nộp tiền", amount: 500000 },
-                  { description: "Khoán công việc", amount: 3000000 }
-              ]);
-          }, 1000);
+          console.error("Tesseract OCR Error:", error);
+          alert("Đã xảy ra lỗi trong quá trình nhận diện hình ảnh. Vui lòng thử lại.");
       } finally {
           setIsAnalyzingBonus(false);
+          setBonusAnalysisProgress(null);
       }
   };
 
@@ -1413,17 +1400,16 @@ export const App: React.FC = () => {
 
   const totalBonus = useMemo(() => activeBonusItems.reduce((acc, item) => acc + item.amount, 0), [activeBonusItems]);
   
-  // Logic: 
-  // Manager: 30% of Total
-  // Staff Pool: Total - Manager Share
-  // Final Staff Pool for Division = Staff Pool - Deductions
-  
   const managerShare = Math.round(totalBonus * 0.3);
-  const staffShare = totalBonus - managerShare; // Ensures the sum is exactly totalBonus (before deduction)
+  const staffShare = totalBonus - managerShare;
   const actualStaffShare = staffShare - bonusDeduction;
   
-  const staffMembers = ["Đào Thế Anh", "Du Thanh Phong", "Đào Thị Thu Hiền"];
-  const perStaffShare = Math.round(actualStaffShare / staffMembers.length);
+    const staffMembers = [
+        { name: "Đào Thế Anh", account: "031119939", bank: "MB" },
+        { name: "Du Thanh Phong", account: "TAIKHOAN_PHONG", bank: "MB" },
+        { name: "Đào Thị Thu Hiền", account: "TAIKHOAN_HIEN", bank: "MB" }
+    ];
+  const perStaffShare = staffMembers.length > 0 ? Math.round(actualStaffShare / staffMembers.length) : 0;
 
   const toggleBonusItem = (index: number) => {
       setExcludedBonusIndices(prev => {
@@ -3014,9 +3000,11 @@ export const App: React.FC = () => {
       case 'tinh-thuong':
           return (
               <div className="w-full max-w-4xl mx-auto">
-                  <header className="text-center mb-8">
-                      <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">TÍNH THƯỞNG TỰ ĐỘNG</h1>
-                      <p className="text-slate-500 mt-2">Phân tích hình ảnh và tính toán phân chia thưởng cho nhân sự.</p>
+                  <header className="text-center mb-8 flex flex-col items-center">
+                      <div className="flex items-center justify-center">
+                        <span className="material-symbols-outlined text-4xl text-indigo-600 mr-2">paid</span>
+                        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">TÍNH THƯỞNG</h1>
+                      </div>
                   </header>
 
                   <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
@@ -3025,11 +3013,8 @@ export const App: React.FC = () => {
                           <div className="flex items-center justify-center w-full">
                               <label htmlFor="dropzone-file" className="flex flex-col items-center justify-center w-full h-48 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
                                   <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                      <svg className="w-8 h-8 mb-4 text-slate-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
-                                          <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
-                                      </svg>
+                                      <span className="material-symbols-outlined text-6xl text-slate-300 mb-3">cloud_upload</span>
                                       <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">Nhấn để tải lên</span> hoặc kéo thả</p>
-                                      <p className="text-xs text-slate-500">Hỗ trợ: PNG, JPG (Chọn nhiều ảnh)</p>
                                   </div>
                                   <input id="dropzone-file" type="file" className="hidden" multiple accept="image/*" onChange={handleBonusImageUpload} />
                               </label>
@@ -3061,13 +3046,21 @@ export const App: React.FC = () => {
                                       : 'bg-orange-600 hover:bg-orange-700 hover:shadow-lg'
                               }`}
                           >
-                              {isAnalyzingBonus ? (
+                              {isAnalyzingBonus && bonusAnalysisProgress ? (
                                   <>
                                       <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                       </svg>
-                                      Đang phân tích...
+                                      <span>{`${bonusAnalysisProgress.status} (${bonusAnalysisProgress.progress}%)`}</span>
+                                  </>
+                              ) : isAnalyzingBonus ? (
+                                  <>
+                                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                      </svg>
+                                      Đang khởi tạo...
                                   </>
                               ) : (
                                   <>
@@ -3088,40 +3081,49 @@ export const App: React.FC = () => {
                                     <span className="material-symbols-outlined text-blue-600">receipt_long</span>
                                     Chi Tiết Thu Nhập
                                 </h3>
-                                <button 
-                                    onClick={() => setIsBonusFilterMode(!isBonusFilterMode)}
-                                    className={`p-2 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${isBonusFilterMode ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                                    title="Lọc các khoản thu nhập"
-                                >
-                                    <span className="material-symbols-outlined">filter_list</span>
-                                </button>
+                                <div ref={bonusFilterDropdownRef} className="relative">
+                                  <button 
+                                      onClick={() => setIsBonusFilterDropdownOpen(!isBonusFilterDropdownOpen)}
+                                      className={`p-2 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${isBonusFilterDropdownOpen ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                      title="Lọc các khoản thu nhập"
+                                  >
+                                      <span className="material-symbols-outlined">filter_alt</span>
+                                  </button>
+                                  {isBonusFilterDropdownOpen && (
+                                    <div className="absolute right-0 mt-2 w-72 bg-white rounded-md shadow-lg py-2 ring-1 ring-black ring-opacity-5 z-20">
+                                      <div className="px-3 py-1 text-xs font-semibold text-slate-500 uppercase">Chọn khoản thu nhập</div>
+                                      <div className="max-h-60 overflow-y-auto mt-1">
+                                        {bonusItems.map((item, index) => (
+                                          <label key={index} className="flex items-center gap-3 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={!excludedBonusIndices.includes(index)}
+                                                onChange={() => toggleBonusItem(index)}
+                                                className="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500"
+                                            />
+                                            <span className="flex-grow">{item.description}</span>
+                                            <span className="font-mono text-xs">{formatCurrency(item.amount)}</span>
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                               
                               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                                  {(isBonusFilterMode ? bonusItems : activeBonusItems).length > 0 ? (isBonusFilterMode ? bonusItems : activeBonusItems).map((item, index) => {
-                                      // If activeBonusItems is used, index is different, so we need true index for toggle
-                                      const trueIndex = isBonusFilterMode ? index : bonusItems.indexOf(item);
-                                      const isExcluded = excludedBonusIndices.includes(trueIndex);
-                                      
+                                  {activeBonusItems.length > 0 ? (activeBonusItems.map((item, index) => {
+                                      const originalIndex = bonusItems.findIndex(bi => bi.description === item.description && bi.amount === item.amount);
                                       return (
-                                      <div key={trueIndex} className={`flex items-center p-3 rounded-lg border ${isExcluded ? 'bg-slate-100 border-slate-200 opacity-60' : 'bg-slate-50 border-slate-100'}`}>
-                                          {isBonusFilterMode && (
-                                              <div className="mr-3 flex items-center">
-                                                  <input 
-                                                      type="checkbox" 
-                                                      checked={!isExcluded}
-                                                      onChange={() => toggleBonusItem(trueIndex)}
-                                                      className="w-5 h-5 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
-                                                  />
-                                              </div>
-                                          )}
-                                          <div className="flex-grow flex justify-between items-center">
-                                              <span className={`font-medium ${isExcluded ? 'text-slate-500 line-through' : 'text-slate-700'}`}>{item.description}</span>
-                                              <span className={`font-mono font-bold ${isExcluded ? 'text-slate-500' : 'text-slate-900'}`}>{formatCurrency(item.amount)}</span>
-                                          </div>
+                                        <div key={originalIndex} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-100">
+                                            <span className="font-medium text-slate-700">{item.description}</span>
+                                            <span className="font-mono font-bold text-slate-900">{formatCurrency(item.amount)}</span>
+                                        </div>
+                                    )})
+                                  ) : (
+                                      <div className="text-center py-4 text-slate-500 italic">
+                                        {bonusItems.length > 0 ? 'Không có khoản nào được chọn.' : 'Không tìm thấy khoản thu nhập nào.'}
                                       </div>
-                                  )}) : (
-                                      <div className="text-center py-4 text-slate-500 italic">Không tìm thấy khoản thu nhập nào.</div>
                                   )}
                               </div>
                               
@@ -3174,20 +3176,31 @@ export const App: React.FC = () => {
                                               </tr>
                                           </thead>
                                           <tbody className="divide-y divide-slate-200">
-                                              {staffMembers.map((staff, idx) => (
-                                                  <tr key={idx}>
-                                                      <td className="px-4 py-3 font-medium text-slate-800">{staff}</td>
-                                                      <td className="px-4 py-3 text-right font-mono font-bold text-green-700">{formatCurrency(perStaffShare)}</td>
-                                                  </tr>
-                                              ))}
+                                              {staffMembers.map((staff, idx) => {
+                                                  const qrLink = `https://img.vietqr.io/image/${staff.bank}-${staff.account}-compact2.png?amount=${perStaffShare}&addInfo=${encodeURIComponent(`Chuyen tien thuong`)}&accountName=${encodeURIComponent(staff.name)}`;
+                                                  return (
+                                                      <tr key={idx}>
+                                                          <td className="px-4 py-3 font-medium text-slate-800">
+                                                              <div className="flex items-center justify-between">
+                                                                  <span>{staff.name}</span>
+                                                                  {perStaffShare > 0 && (
+                                                                      <button 
+                                                                          onClick={() => setQrModalData({ name: staff.name, qrLink: qrLink })}
+                                                                          className="p-1 rounded-full text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500"
+                                                                          title={`Tạo QR thanh toán cho ${staff.name}`}
+                                                                      >
+                                                                          <span className="material-symbols-outlined" style={{ verticalAlign: 'middle' }}>qr_code_scanner</span>
+                                                                      </button>
+                                                                  )}
+                                                              </div>
+                                                          </td>
+                                                          <td className="px-4 py-3 text-right font-mono font-bold text-green-700">{formatCurrency(perStaffShare)}</td>
+                                                      </tr>
+                                                  );
+                                              })}
                                           </tbody>
                                       </table>
                                   </div>
-                                  {bonusDeduction > 0 && (
-                                      <p className="text-xs text-slate-500 mt-2 text-right italic">
-                                          * Đã trừ {formatCurrency(bonusDeduction)} trước khi chia.
-                                      </p>
-                                  )}
                               </div>
                           </div>
                       </div>
@@ -3367,7 +3380,7 @@ export const App: React.FC = () => {
                                         onClick={() => { handleFeatureClick('tinh-thuong'); setIsFeatureMenuOpen(false); }}
                                         className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
                                     >
-                                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>calculate</span>
+                                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>paid</span>
                                         <span>Tính Thưởng</span>
                                     </button>
                                 </div>
@@ -3511,42 +3524,4 @@ export const App: React.FC = () => {
                     <div className="p-2 border-2 border-amber-200 rounded-xl bg-amber-50">
                         <img 
                             src={`https://img.vietqr.io/image/MB-031119939-compact2.png?amount=10000&addInfo=VIP%20${currentUser?.username}&accountName=DAO%20THE%20ANH`}
-                            alt="VietQR MB Bank" 
-                            className="w-64 h-auto rounded-lg"
-                        />
-                    </div>
-
-                    <div className="w-full text-left bg-slate-50 p-3 rounded-lg border border-slate-200 text-sm">
-                        <p className="mb-1"><span className="font-semibold text-slate-700">Ngân hàng:</span> MB Bank</p>
-                        <p className="mb-1"><span className="font-semibold text-slate-700">Số tài khoản:</span> <span className="font-mono font-bold text-lg text-indigo-700">031119939</span></p>
-                        <p className="mb-1"><span className="font-semibold text-slate-700">Chủ tài khoản:</span> DAO THE ANH</p>
-                        <p><span className="font-semibold text-slate-700">Nội dung:</span> <span className="font-mono font-bold text-slate-800">VIP {currentUser?.username}</span></p>
-                    </div>
-
-                    <button 
-                        onClick={handleConfirmVipPayment}
-                        disabled={isVerifyingPayment}
-                        className={`w-full py-3 font-bold rounded-lg shadow-md transition-colors flex items-center justify-center gap-2 ${isVerifyingPayment ? 'bg-slate-400 cursor-not-allowed text-white' : 'bg-green-600 hover:bg-green-700 text-white'}`}
-                    >
-                        {isVerifyingPayment ? (
-                            <>
-                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Đang xác thực giao dịch...
-                            </>
-                        ) : (
-                            <>
-                                <span className="material-symbols-outlined">check_circle</span>
-                                Đã thanh toán - Kích hoạt ngay
-                            </>
-                        )}
-                    </button>
-                </div>
-            </div>
-        </div>
-    )}
-    </div>
-  );
-};
+                            alt="VietQR MB
