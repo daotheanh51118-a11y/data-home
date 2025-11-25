@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
+import { processImagesForBonuses, BonusItem } from './gemini-vision';
 
 
 // --- Type Declarations ---
@@ -65,8 +66,6 @@ type PosmChangeItem = {
   bonusPoint?: string;
 };
 
-type BonusItem = { description: string; amount: number };
-
 type Employee = { 
   name: string; 
   bank: string; 
@@ -109,22 +108,6 @@ const findValue = (row: any, keys: string[]): any => {
         }
     }
     return undefined;
-};
-
-const blobToBase64 = (blob: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            if (reader.result) {
-                const base64data = (reader.result as string).split(',')[1];
-                resolve(base64data);
-            } else {
-                reject(new Error("File reading failed"));
-            }
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-    });
 };
 
 const parseProductNameForPosm = (name: string): string => {
@@ -1957,60 +1940,15 @@ export const App: React.FC = () => {
     setSelectedBonusDescriptions([]);
 
     try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const prompt = `Từ hình ảnh được cung cấp, hãy trích xuất tất cả các dòng văn bản có chứa số tiền và bắt đầu bằng một trong các cụm từ sau: "Thưởng thi đua", "Khoán công việc", "Thưởng nộp tiền NH", "trợ cấp". Với mỗi dòng tìm thấy, hãy lấy toàn bộ nội dung mô tả và số tiền đi kèm (chỉ lấy số). Bỏ qua tất cả các dòng không liên quan. Trả về kết quả dưới dạng một mảng JSON. Mỗi đối tượng trong mảng phải có hai thuộc tính: "description" (string) và "amount" (number). Nếu không tìm thấy mục nào, trả về một mảng rỗng. Ví dụ: [{"description": "Thưởng thi đua doanh số tháng 5", "amount": 500000}]`;
-
-        const imageProcessPromises = bonusImages.map(async (image) => {
-            const base64Data = await blobToBase64(image);
-            const imagePart = {
-                inlineData: {
-                    mimeType: image.type,
-                    data: base64Data,
-                },
-            };
-
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: { parts: [imagePart, { text: prompt }] },
-                config: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                description: { type: Type.STRING },
-                                amount: { type: Type.NUMBER },
-                            },
-                            required: ["description", "amount"],
-                        },
-                    },
-                },
-            });
-            const jsonText = response.text.trim();
-            return JSON.parse(jsonText);
-        });
-
-        const results = await Promise.allSettled(imageProcessPromises);
-        
-        const allBonuses: BonusItem[] = [];
-        results.forEach(result => {
-            if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-                allBonuses.push(...result.value);
-            } else if (result.status === 'rejected') {
-                console.error("Một ảnh xử lý thất bại:", result.reason);
-            }
-        });
-
+        const allBonuses = await processImagesForBonuses(bonusImages);
         if (allBonuses.length > 0) {
             setExtractedBonuses(allBonuses);
         } else {
             setImageError('Không tìm thấy khoản thưởng nào hợp lệ trong các ảnh đã tải lên.');
         }
-
-    } catch (err) {
+    } catch (err: any) {
         console.error("Lỗi khi xử lý ảnh:", err);
-        setImageError('Đã xảy ra lỗi khi phân tích hình ảnh. Vui lòng thử lại.');
+        setImageError(err.message || 'Đã xảy ra lỗi khi phân tích hình ảnh. Vui lòng thử lại.');
     } finally {
         setIsProcessingImage(false);
     }
@@ -3434,114 +3372,4 @@ export const App: React.FC = () => {
                         />
                     </div>
                     <div>
-                        <label htmlFor="bug-screenshot" className="block text-sm font-semibold text-slate-700 mb-1.5">Hình ảnh lỗi</label>
-                        <input
-                            id="bug-screenshot"
-                            type="file"
-                            accept="image/*"
-                            onChange={handleScreenshotChange}
-                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                        />
-                        {bugReportScreenshotPreview && (
-                             <div className="mt-4 p-2 border border-slate-200 rounded-lg inline-block">
-                                <img src={bugReportScreenshotPreview} alt="Xem trước ảnh lỗi" className="max-h-40 rounded" />
-                            </div>
-                        )}
-                        <p className="mt-1.5 text-xs text-slate-500">Vui lòng chụp ảnh màn hình lỗi và tải lên tại đây.</p>
-                    </div>
-                </form>
-                <footer className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end items-center gap-3 flex-shrink-0">
-                    <button type="button" onClick={handleCloseBugReport} className="px-4 py-2 text-sm bg-white text-slate-700 border border-slate-300 font-semibold rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-400">
-                        Hủy
-                    </button>
-                    <button type="submit" form="bug-report-form" onClick={handleBugReportSubmit} className="px-4 py-2 text-sm bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
-                        Gửi Báo Lỗi
-                    </button>
-                </footer>
-            </div>
-        </div>
-    )}
-    
-    {isVipModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={() => setIsVipModalOpen(false)}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                <div className="bg-gradient-to-r from-amber-400 to-yellow-500 p-4 flex justify-between items-center">
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                        <span className="material-symbols-outlined">workspace_premium</span>
-                        Nâng Cấp Tài Khoản VIP
-                    </h2>
-                    <button onClick={() => setIsVipModalOpen(false)} className="text-white/80 hover:text-white transition-colors">
-                        <span className="material-symbols-outlined">close</span>
-                    </button>
-                </div>
-                <div className="p-6 flex flex-col items-center text-center space-y-4">
-                    <p className="text-slate-600 text-sm">
-                        Quét mã QR bên dưới để thanh toán <span className="font-bold text-red-600">10.000đ</span> và sử dụng VIP trong <span className="font-bold text-slate-800">30 ngày</span>.
-                    </p>
-                    
-                    <div className="p-2 border-2 border-amber-200 rounded-xl bg-amber-50">
-                        <img 
-                            src={`https://img.vietqr.io/image/MB-031119939-compact2.png?amount=10000&addInfo=VIP%20${currentUser?.username}&accountName=DAO%20THE%20ANH`}
-                            alt="VietQR MB Bank"
-                            className="w-64 h-64"
-                        />
-                    </div>
-                    <p className="text-xs text-slate-500 max-w-sm">
-                        Nội dung chuyển khoản đã được tạo sẵn. Sau khi thanh toán, nhấn nút "Xác nhận đã thanh toán" để kích hoạt VIP.
-                    </p>
-                </div>
-                 <div className="p-4 bg-slate-50 border-t border-slate-200">
-                    <button 
-                        onClick={handleConfirmVipPayment}
-                        disabled={isVerifyingPayment}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed"
-                    >
-                         {isVerifyingPayment ? (
-                            <>
-                               <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Đang xác thực...
-                            </>
-                        ) : (
-                            "Xác nhận đã thanh toán"
-                        )}
-                    </button>
-                </div>
-            </div>
-        </div>
-    )}
-
-     {qrModalData && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={() => setQrModalData(null)}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                <div className="p-4 flex justify-between items-center border-b border-slate-200">
-                    <h2 className="text-lg font-bold text-slate-800">Chuyển Khoản Thưởng</h2>
-                    <button onClick={() => setQrModalData(null)} className="text-slate-500 hover:text-slate-800 transition-colors">
-                        <span className="material-symbols-outlined">close</span>
-                    </button>
-                </div>
-                <div className="p-6 flex flex-col items-center text-center space-y-4">
-                    <p className="text-slate-600 text-sm">
-                        Quét mã QR để chuyển <span className="font-bold text-red-600">{formatCurrency(qrModalData.amount)}</span> cho <span className="font-bold text-slate-800">{qrModalData.employee.name}</span>.
-                    </p>
-                    
-                    <div className="p-2 border border-slate-200 rounded-lg bg-slate-50">
-                       <img 
-                            src={`https://img.vietqr.io/image/${qrModalData.employee.bankBin}-${qrModalData.employee.accountNumber}-compact2.png?amount=${qrModalData.amount}&addInfo=Thuong%20thang`}
-                            alt={`QR Code for ${qrModalData.employee.name}`}
-                            className="w-64 h-64"
-                        />
-                    </div>
-                    <div className="text-sm text-slate-600">
-                        <p><span className="font-semibold">Ngân hàng:</span> {qrModalData.employee.bank}</p>
-                        <p><span className="font-semibold">STK:</span> {qrModalData.employee.accountNumber}</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    )}
-    </div>
-  );
-};
+                        <label htmlFor="bug-screenshot" className="block text-
