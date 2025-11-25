@@ -1,4 +1,8 @@
+
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { GoogleGenAI, Type } from "@google/genai";
+
 
 // --- Type Declarations ---
 declare global {
@@ -6,7 +10,6 @@ declare global {
     XLSX: any;
     QRCode: any;
     JsBarcode: any;
-    Tesseract: any;
   }
 }
 
@@ -62,9 +65,13 @@ type PosmChangeItem = {
   bonusPoint?: string;
 };
 
-type BonusItem = {
-    description: string;
-    amount: number;
+type BonusItem = { description: string; amount: number };
+
+type Employee = { 
+  name: string; 
+  bank: string; 
+  accountNumber: string; 
+  bankBin: string; 
 };
 
 
@@ -102,6 +109,22 @@ const findValue = (row: any, keys: string[]): any => {
         }
     }
     return undefined;
+};
+
+const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            if (reader.result) {
+                const base64data = (reader.result as string).split(',')[1];
+                resolve(base64data);
+            } else {
+                reject(new Error("File reading failed"));
+            }
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
 };
 
 const parseProductNameForPosm = (name: string): string => {
@@ -170,6 +193,7 @@ const getIconSvg = (category: string, className: string = "") => {
     return `<span class="material-symbols-outlined ${className}" style="vertical-align: middle;">${iconName}</span>`;
 };
 
+
 // --- Reusable Components ---
 const StatCard: React.FC<{ title: string; value: string | number; className?: string; }> = ({ title, value, className }) => (
     <div className={`bg-white p-4 rounded-lg shadow-sm border border-slate-200 ${className}`}>
@@ -192,28 +216,38 @@ const QRCodeComponent: React.FC<{ text: string, size?: number }> = ({ text, size
     return <canvas ref={canvasRef} style={{ width: `${size}px`, height: `${size}px` }} />;
 };
 
-const BarcodeComponent: React.FC<{ text: string; format?: string }> = ({ text, format = "CODE128" }) => {
+const BarcodeComponent: React.FC<{ text: string }> = ({ text }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-
     useEffect(() => {
         if (canvasRef.current && text) {
             try {
                 window.JsBarcode(canvasRef.current, text, {
-                    format: format,
-                    lineColor: "#000",
-                    width: 2,
-                    height: 100,
-                    displayValue: true
+                    format: "CODE128",
+                    displayValue: true,
+                    fontSize: 18,
+                    margin: 10,
                 });
             } catch (e) {
-                console.error("Invalid barcode data", e);
+                console.error("JsBarcode error:", e);
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    canvas.width = 300; 
+                    canvas.height = 100;
+                    ctx.font = "16px Arial";
+                    ctx.fillStyle = "red";
+                    ctx.textAlign = "center";
+                    ctx.fillText("Dữ liệu không hợp lệ cho mã vạch", canvas.width / 2, canvas.height / 2);
+                }
             }
         }
-    }, [text, format]);
+    }, [text]);
 
-    return <canvas ref={canvasRef} className="max-w-full h-auto" />;
+    if (!text) return null;
+
+    return <canvas ref={canvasRef} />;
 };
-
 
 const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ category, className = "text-base" }) => {
     const iconName = getCategoryIconName(category);
@@ -243,6 +277,41 @@ const CategoryIcon: React.FC<{ category: string; className?: string }> = ({ cate
     return <span className={`material-symbols-outlined ${className}`}>{iconName}</span>;
 };
 
+const LucideIcon: React.FC<{ name: string; className?: string; size?: number | string; }> = ({ name, className = "", size = "1em" }) => {
+    // FIX: Add explicit type to iconProps to satisfy SVG properties type checking for strokeLinecap and strokeLinejoin.
+    const iconProps: React.SVGProps<SVGSVGElement> = {
+        className,
+        width: size,
+        height: size,
+        viewBox: "0 0 24 24",
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: "2",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+    };
+
+    const icons: { [key: string]: React.ReactNode } = {
+        'image-plus': (
+            <svg {...iconProps}>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/><line x1="16" x2="22" y1="5" y2="5"/><line x1="19" x2="19" y1="2" y2="8"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+            </svg>
+        ),
+        'refresh-ccw': (
+            <svg {...iconProps}>
+                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/>
+            </svg>
+        ),
+        'chart-no-axes-combined': (
+            <svg {...iconProps}>
+                <path d="M12 16v-6" /><path d="M16 16v-3" /><path d="M20 16V8" /><path d="M4 16v-4" /><path d="M8 16v-2" />
+            </svg>
+        ),
+    };
+
+    return icons[name] || null;
+};
+
 // --- Main App Component ---
 const SESSION_TIMEOUT_MS = 48 * 60 * 60 * 1000; // 48 hours
 
@@ -254,9 +323,15 @@ const pageTitles: Record<Page, string> = {
   'kiem-hang-chuyen-kho': 'Kiểm Hàng Chuyển Kho',
   'thay-posm': 'Thay POSM',
   'ma-qr': 'Tạo Mã QR',
+  'tinh-thuong': 'Tính Thưởng',
   'thong-tin': 'Thông Tin',
-  'tinh-thuong': 'Tính Thưởng'
 };
+
+const employees: Employee[] = [
+  { name: 'Đào Thế Anh', bank: 'Techcombank', accountNumber: '5593111993', bankBin: '970407' },
+  { name: 'Du Thanh Phong', bank: 'TP Bank', accountNumber: '82706071998', bankBin: '970423' },
+  { name: 'Đào Thị Thu Hiền', bank: 'Vietcombank', accountNumber: '1019984697', bankBin: '970436' }
+];
 
 const ReportBugButton: React.FC<{ onClick: () => void }> = ({ onClick }) => {
     return (
@@ -290,13 +365,10 @@ export const App: React.FC = () => {
   const [registerSuccess, setRegisterSuccess] = useState('');
   
   const [currentPage, setCurrentPage] = useState<Page>('trang-chu');
-  
-  // Dropdowns state
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
-  
-  const [isFeatureMenuOpen, setIsFeatureMenuOpen] = useState(false);
-  const featureMenuRef = useRef<HTMLDivElement>(null);
+  const [isFeaturesMenuOpen, setIsFeaturesMenuOpen] = useState(false);
+  const featuresMenuRef = useRef<HTMLDivElement>(null);
   
   // State for Kiem Quy
   const [counts, setCounts] = useState<Record<number, number>>(
@@ -340,18 +412,19 @@ export const App: React.FC = () => {
 
   // State for Ma QR
   const [qrGeneratorText, setQrGeneratorText] = useState<string>('');
-  const [codeType, setCodeType] = useState<'qr' | 'barcode'>('qr');
+  const [generatorType, setGeneratorType] = useState<'qr' | 'barcode'>('qr');
 
   // State for Tinh Thuong
   const [bonusImages, setBonusImages] = useState<File[]>([]);
-  const [bonusItems, setBonusItems] = useState<BonusItem[]>([]);
-  const [isAnalyzingBonus, setIsAnalyzingBonus] = useState<boolean>(false);
-  const [bonusAnalysisProgress, setBonusAnalysisProgress] = useState<{ status: string; progress: number } | null>(null);
-  const [excludedBonusIndices, setExcludedBonusIndices] = useState<number[]>([]);
-  const [isBonusFilterDropdownOpen, setIsBonusFilterDropdownOpen] = useState(false);
-  const bonusFilterDropdownRef = useRef<HTMLDivElement>(null);
+  const [bonusImagePreviews, setBonusImagePreviews] = useState<string[]>([]);
+  const [extractedBonuses, setExtractedBonuses] = useState<BonusItem[]>([]);
+  const [isProcessingImage, setIsProcessingImage] = useState<boolean>(false);
+  const [imageError, setImageError] = useState<string>('');
+  const [selectedBonusDescriptions, setSelectedBonusDescriptions] = useState<string[]>([]);
+  const [isFilterMenuOpen, setIsFilterMenuOpen] = useState<boolean>(false);
+  const filterMenuRef = useRef<HTMLDivElement>(null);
   const [bonusDeduction, setBonusDeduction] = useState<number>(0);
-  const [qrModalData, setQrModalData] = useState<{ name: string; qrLink: string; } | null>(null);
+  const [qrModalData, setQrModalData] = useState<{ employee: Employee; amount: number } | null>(null);
 
   // State for Bug Report Modal
   const [isBugReportOpen, setIsBugReportOpen] = useState<boolean>(false);
@@ -370,7 +443,7 @@ export const App: React.FC = () => {
   const isVip = currentUser?.tier === 'vip';
   const isFree = currentUser?.tier === 'free';
   
-  const paidFeatures: Page[] = ['kiem-hang-chuyen-kho', 'kiem-tra-ton-kho', 'thay-posm', 'ma-qr'];
+  const paidFeatures: Page[] = ['kiem-hang-chuyen-kho', 'kiem-tra-ton-kho', 'thay-posm', 'ma-qr', 'tinh-thuong'];
   
   const isFeatureLocked = (page: Page): boolean => {
       if (isAdmin || isVip) return false;
@@ -536,11 +609,11 @@ export const App: React.FC = () => {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
         setIsUserMenuOpen(false);
       }
-      if (featureMenuRef.current && !featureMenuRef.current.contains(event.target as Node)) {
-        setIsFeatureMenuOpen(false);
+      if (featuresMenuRef.current && !featuresMenuRef.current.contains(event.target as Node)) {
+        setIsFeaturesMenuOpen(false);
       }
-      if (bonusFilterDropdownRef.current && !bonusFilterDropdownRef.current.contains(event.target as Node)) {
-        setIsBonusFilterDropdownOpen(false);
+      if (filterMenuRef.current && !filterMenuRef.current.contains(event.target as Node)) {
+        setIsFilterMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -609,8 +682,7 @@ export const App: React.FC = () => {
   };
   
    const handleUpgradeToVip = () => {
-        // Disabled for now
-        // setIsVipModalOpen(true);
+        setIsVipModalOpen(true);
     };
 
     const handleConfirmVipPayment = () => {
@@ -1299,135 +1371,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // --- Tinh Thuong Logic ---
-  const handleBonusImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-      if (event.target.files && event.target.files.length > 0) {
-          setBonusImages(Array.from(event.target.files));
-      }
-  };
-
-  const handleAnalyzeBonus = async () => {
-      if (bonusImages.length === 0) {
-          alert("Vui lòng chọn ít nhất một hình ảnh để phân tích.");
-          return;
-      }
-
-      setIsAnalyzingBonus(true);
-      setBonusAnalysisProgress({ status: 'Khởi tạo...', progress: 0 });
-      setBonusItems([]);
-      setExcludedBonusIndices([]);
-
-      const allFoundItems: BonusItem[] = [];
-      const validationKeywords = [/thưởng/i, /trợ\s*cấp/i, /khoán/i, /pc/i, /kpi/i, /incentive/i, /phụ\s*cấp/i, /lương/i];
-
-      const parseTextForBonuses = (text: string) => {
-          // Regex to find all numbers that look like currency (e.g., 1.000.000 or 100,000)
-          // It handles dots, commas, and even spaces as thousand separators.
-          const currencyRegex = /(\d{1,3}(?:[.,\s]\d{3})*)/g;
-
-          // Find all potential amounts and their positions (indices) in the full text.
-          const matches = [...text.matchAll(currencyRegex)];
-
-          // Filter out numbers that are unlikely to be currency values (e.g., small numbers, years).
-          const plausibleMatches = matches.filter(match => {
-              const amount = parseInt(match[0].replace(/[.,\s]/g, ''), 10);
-              return !isNaN(amount) && amount >= 1000;
-          });
-
-          if (plausibleMatches.length === 0) return;
-
-          let lastIndex = 0;
-
-          // Iterate through the plausible currency matches to determine the description for each.
-          plausibleMatches.forEach(match => {
-              const amountString = match[0];
-              const amount = parseInt(amountString.replace(/[.,\s]/g, ''), 10);
-              
-              // The description is the text between the end of the last amount and the start of this one.
-              const descriptionEndIndex = match.index!;
-              let rawDescription = text.substring(lastIndex, descriptionEndIndex);
-
-              // Update lastIndex for the next iteration to the end of the current amount string.
-              lastIndex = descriptionEndIndex + amountString.length;
-
-              // Clean up the extracted description text.
-              const cleanedDescription = rawDescription
-                  .replace(/\n/g, ' ') // Replace newlines with spaces to join multi-line descriptions.
-                  .replace(/\s+/g, ' ') // Collapse multiple spaces into one.
-                  .trim();
-              
-              // Validate the cleaned description to ensure it's meaningful.
-              if (cleanedDescription.length > 2 && validationKeywords.some(kw => kw.test(cleanedDescription))) {
-                  allFoundItems.push({
-                      description: cleanedDescription,
-                      amount: amount
-                  });
-              }
-          });
-      };
-
-      try {
-          const worker = await window.Tesseract.createWorker('vie', 1, {
-              logger: (m: any) => {
-                  if (m.status === 'recognizing text') {
-                      setBonusAnalysisProgress(prev => ({ ...(prev!), progress: Math.round(m.progress * 100) }));
-                  }
-              }
-          });
-
-          for (let i = 0; i < bonusImages.length; i++) {
-              const file = bonusImages[i];
-              setBonusAnalysisProgress({ status: `Xử lý ảnh ${i + 1}/${bonusImages.length}`, progress: 0 });
-              const { data: { text } } = await worker.recognize(file);
-              parseTextForBonuses(text);
-          }
-
-          await worker.terminate();
-          setBonusItems(allFoundItems);
-          if(allFoundItems.length === 0){
-               alert("Không tìm thấy khoản thưởng nào hợp lệ trong ảnh. Vui lòng kiểm tra lại hình ảnh hoặc thử với ảnh rõ nét hơn.");
-          }
-
-      } catch (error) {
-          console.error("Tesseract OCR Error:", error);
-          alert("Đã xảy ra lỗi trong quá trình nhận diện hình ảnh. Vui lòng thử lại.");
-      } finally {
-          setIsAnalyzingBonus(false);
-          setBonusAnalysisProgress(null);
-      }
-  };
-
-  const activeBonusItems = useMemo(() => {
-      return bonusItems.filter((_, idx) => !excludedBonusIndices.includes(idx));
-  }, [bonusItems, excludedBonusIndices]);
-
-  const totalBonus = useMemo(() => activeBonusItems.reduce((acc, item) => acc + item.amount, 0), [activeBonusItems]);
-  
-  const managerShare = Math.round(totalBonus * 0.3);
-  const staffShare = totalBonus - managerShare;
-  const actualStaffShare = staffShare - bonusDeduction;
-  
-    const staffMembers = [
-        { name: "Đào Thế Anh", account: "031119939", bank: "MB" },
-        { name: "Du Thanh Phong", account: "TAIKHOAN_PHONG", bank: "MB" },
-        { name: "Đào Thị Thu Hiền", account: "TAIKHOAN_HIEN", bank: "MB" }
-    ];
-  const perStaffShare = staffMembers.length > 0 ? Math.round(actualStaffShare / staffMembers.length) : 0;
-
-  const toggleBonusItem = (index: number) => {
-      setExcludedBonusIndices(prev => {
-          if (prev.includes(index)) {
-              return prev.filter(i => i !== index); // Include it back
-          } else {
-              return [...prev, index]; // Exclude it
-          }
-      });
-  };
-
-  const handleBonusDeductionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      setBonusDeduction(parseFormattedNumber(e.target.value));
-  };
-
   // --- Thay POSM Logic ---
   const handlePosmFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1457,115 +1400,67 @@ export const App: React.FC = () => {
         let headerRowIndex = -1;
         let dataStartIndex = 0;
 
-        // --- Auto-detection Algorithm v2 ---
-        // Tìm dòng tiêu đề bằng cách quét các từ khóa
-        for (let i = 0; i < Math.min(rows.length, 15); i++) {
-            const rowStr = rows[i].map(c => String(c).toLowerCase().trim());
-            const hasName = rowStr.some(c => /tên\s*(sản\s*phẩm|hàng|sp)|product\s*name|description|diễn\s*giải/i.test(c));
-            const hasPrice = rowStr.some(c => /giá/i.test(c));
-            
-            if (hasName && hasPrice) {
+        // Phase 1: Try to find "Tên sản phẩm" header with a strict match
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+            const foundIndex = rows[i].findIndex(cell => String(cell).toLowerCase().trim() === 'tên sản phẩm');
+            if (foundIndex !== -1) {
                 headerRowIndex = i;
+                productNameIndex = foundIndex;
                 break;
             }
         }
 
+        // Phase 2: Determine column indices and data start row
         if (headerRowIndex !== -1) {
             const header = rows[headerRowIndex].map(c => String(c).toLowerCase().trim());
             
-            // Regex patterns
-            const nameRegex = /tên\s*(sản\s*phẩm|hàng|sp)|product\s*name|description|diễn\s*giải/i;
-            const codeRegex = /mã\s*(sản\s*phẩm|sp|hàng)|product\s*code|sku|model/i;
-            
-            // Tránh nhầm lẫn "Giá treo", "Giá đỡ"
-            const excludeRegex = /treo|đỡ|kệ/i; 
-
-            const oldPriceRegex = /giá\s*(gốc|cũ|niêm\s*yết|bìa|trước\s*giảm)|old\s*price/i;
-            const newPriceRegex = /giá\s*(mới|bán|km|khuyến\s*mãi|thu|sau\s*giảm)|new\s*price|thực\s*thu/i;
-            
-            // Nếu chỉ có chữ "Giá" chung chung
-            const genericPriceRegex = /^giá$|price|^giá\s*bán$/i;
-
-            const promotionRegex = /khuyến\s*mãi|quà\s*tặng|promotion|ctkm/i;
-
-            // Scoring mechanism for prices
-            let bestOldPriceIdx = -1;
-            let bestNewPriceIdx = -1;
-            
-            header.forEach((colName, idx) => {
-                if (nameRegex.test(colName) && productNameIndex === -1) productNameIndex = idx;
-                if (codeRegex.test(colName) && productCodeIndex === -1) productCodeIndex = idx;
-                if (promotionRegex.test(colName) && !/giá/i.test(colName) && promotionIndex === -1) promotionIndex = idx;
-                
-                // Skip if excluded
-                if (excludeRegex.test(colName)) return;
-
-                if (oldPriceRegex.test(colName)) bestOldPriceIdx = idx;
-                if (newPriceRegex.test(colName)) bestNewPriceIdx = idx;
-            });
-            
-            // Fallback logic if specific regex didn't match
-            if (bestOldPriceIdx === -1 && bestNewPriceIdx === -1) {
-                 // Tìm tất cả cột có chữ "giá"
-                 const priceIndices = header.map((h, i) => (h.includes('giá') && !excludeRegex.test(h) ? i : -1)).filter(i => i !== -1);
-                 if (priceIndices.length >= 2) {
-                     // Giả định cột giá đầu tiên là Giá Gốc, cột sau là Giá Mới (thường thấy trong file excel)
-                     bestOldPriceIdx = priceIndices[0];
-                     bestNewPriceIdx = priceIndices[1];
-                 } else if (priceIndices.length === 1) {
-                     // Nếu chỉ có 1 cột giá, đó là giá bán (New Price)
-                     bestNewPriceIdx = priceIndices[0];
-                 }
+            productCodeIndex = header.findIndex(h => h.includes('mã sản phẩm'));
+            if (productCodeIndex === -1) {
+                productCodeIndex = productNameIndex + 1;
             }
 
-            oldPriceIndex = bestOldPriceIdx;
-            newPriceIndex = bestNewPriceIdx;
-            
-            // Final check: if we found New Price but no Old Price, maybe New Price IS the price
-            if (newPriceIndex !== -1 && oldPriceIndex === -1) {
-                // Old Price can be 0 or same as New Price later in logic
+            oldPriceIndex = header.findIndex(h => h.includes('giá gốc') || h.includes('giá cũ'));
+            if (oldPriceIndex === -1) {
+                oldPriceIndex = 15; // Fallback to Column P
             }
 
-            // Fix for common files where "Giá bán" is meant to be current price
-            if (newPriceIndex === -1 && oldPriceIndex !== -1) {
-                newPriceIndex = oldPriceIndex; // Swap if logic failed
-                oldPriceIndex = -1;
+            newPriceIndex = header.findIndex(h => h.includes('giá mới') || h.includes('giá sau giảm'));
+            if (newPriceIndex === -1) {
+                newPriceIndex = 16; // Fallback to Column Q
             }
             
-            // Fallback for Code if not found: Next to Name
-            if (productCodeIndex === -1 && productNameIndex !== -1) {
-                 productCodeIndex = productNameIndex + 1;
+            promotionIndex = header.findIndex(h => h.includes('khuyến mãi'));
+            if (promotionIndex === -1) {
+                promotionIndex = 29; // Fallback to Column AD
             }
-
             dataStartIndex = headerRowIndex + 1;
         } else {
-            // Fallback to hardcoded columns if no header found (Legacy support)
             productNameIndex = 25; // Z
             productCodeIndex = 26; // AA
             oldPriceIndex = 15;   // P
             newPriceIndex = 16;   // Q
             promotionIndex = 29; // AD
-            dataStartIndex = 0; 
+            dataStartIndex = 0; // Assume no header, start from first row
         }
 
-        // Parse data
+        // Phase 3: Parse data
         const loadedItems: PosmChangeItem[] = [];
         for (let i = dataStartIndex; i < rows.length; i++) {
             const row = rows[i];
             
-            if (row.length === 0 || productNameIndex === -1 || !row[productNameIndex]) {
+            if (row.length === 0 || row.length <= productNameIndex || !row[productNameIndex]) {
                 continue;
             }
 
             const productName = String(row[productNameIndex]).trim();
-            if (productName === '' || productName.toLowerCase() === 'tên sản phẩm') continue;
+            if (productName === '') continue;
 
-            const productCode = (productCodeIndex !== -1 && row[productCodeIndex]) ? String(row[productCodeIndex]).trim() : `POSM-${i}`;
-            const oldPriceString = (oldPriceIndex !== -1 && row[oldPriceIndex]) ? String(row[oldPriceIndex]) : '0';
-            const newPriceString = (newPriceIndex !== -1 && row[newPriceIndex]) ? String(row[newPriceIndex]) : '0';
-            const promotionText = (promotionIndex !== -1 && row[promotionIndex]) ? String(row[promotionIndex]).trim() : '';
+            const productCode = row.length > productCodeIndex ? String(row[productCodeIndex] || `POSM-${i}`).trim() : `POSM-${i}`;
+            const oldPriceString = row.length > oldPriceIndex ? String(row[oldPriceIndex] || '0') : '0';
+            const newPriceString = row.length > newPriceIndex ? String(row[newPriceIndex] || '0') : '0';
+            const promotionText = row.length > promotionIndex ? String(row[promotionIndex] || '').trim() : '';
 
-            // Extract bonus point
+            // Extract bonus point from product code
             let bonusPoint = undefined;
             const codeParts = productCode.split('-');
             if (codeParts.length > 1) {
@@ -1573,7 +1468,9 @@ export const App: React.FC = () => {
                 if (bonusPart && bonusPart.length >= 5) {
                     const potentialBonus = bonusPart.substring(4);
                     const match = potentialBonus.match(/\d{2,3}/);
-                    if (match) bonusPoint = match[0];
+                    if (match) {
+                        bonusPoint = match[0];
+                    }
                 }
             }
             
@@ -1588,7 +1485,7 @@ export const App: React.FC = () => {
         }
         
         if (loadedItems.length === 0) {
-            alert("Không tìm thấy dữ liệu sản phẩm hợp lệ. Vui lòng kiểm tra lại file Excel.");
+            alert("Không đọc được dữ liệu sản phẩm. Vui lòng kiểm tra lại định dạng file và vị trí cột.");
             setPosmItems([]);
         } else {
             setPosmItems(loadedItems);
@@ -1597,7 +1494,7 @@ export const App: React.FC = () => {
 
       } catch (error) {
         console.error("Error reading or parsing Excel file for POSM:", error);
-        alert("Đã xảy ra lỗi khi xử lý file Excel. Vui lòng đảm bảo file không bị lỗi.");
+        alert("Đã xảy ra lỗi khi xử lý file Excel. Vui lòng đảm bảo file không bị lỗi và đúng định dạng.");
       }
     };
     reader.readAsArrayBuffer(file);
@@ -2026,50 +1923,134 @@ export const App: React.FC = () => {
     }
   };
 
-  const handlePrintBarcode = () => {
-      if (!qrGeneratorText) return;
-      
-      const printContent = `
-        <html>
-            <head>
-                <title>In Mã Vạch</title>
-                <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-                <style>
-                    body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                    .barcode-container { text-align: center; }
-                </style>
-            </head>
-            <body>
-                <div class="barcode-container">
-                    <svg id="barcode"></svg>
-                </div>
-                <script>
-                    JsBarcode("#barcode", "${qrGeneratorText}", {
-                        format: "CODE128",
-                        lineColor: "#000",
-                        width: 2,
-                        height: 100,
-                        displayValue: true,
-                        fontSize: 20
-                    });
-                    window.onload = function() { window.print(); }
-                </script>
-            </body>
-        </html>
-      `;
-      
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printContent);
-          printWindow.document.close();
-      }
+  // --- Tinh Thuong Logic ---
+  const handleBonusDeductionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBonusDeduction(parseFormattedNumber(e.target.value));
   };
+
+  const handleBonusImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Revoke old object URLs to prevent memory leaks
+    bonusImagePreviews.forEach(URL.revokeObjectURL);
+
+    if (e.target.files && e.target.files.length > 0) {
+        const files = Array.from(e.target.files);
+        setBonusImages(files);
+        const newPreviews = files.map(file => URL.createObjectURL(file));
+        setBonusImagePreviews(newPreviews);
+        setExtractedBonuses([]);
+        setImageError('');
+    } else {
+        setBonusImages([]);
+        setBonusImagePreviews([]);
+    }
+    e.target.value = ''; // Reset file input so the same file can be selected again
+  };
+
+  const handleProcessImage = async () => {
+    if (bonusImages.length === 0) {
+        setImageError('Vui lòng chọn ít nhất một hình ảnh để xử lý.');
+        return;
+    }
+    setIsProcessingImage(true);
+    setExtractedBonuses([]);
+    setImageError('');
+    setSelectedBonusDescriptions([]);
+
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const prompt = `Từ hình ảnh được cung cấp, hãy trích xuất tất cả các dòng văn bản có chứa số tiền và bắt đầu bằng một trong các cụm từ sau: "Thưởng thi đua", "Khoán công việc", "Thưởng nộp tiền NH", "trợ cấp". Với mỗi dòng tìm thấy, hãy lấy toàn bộ nội dung mô tả và số tiền đi kèm (chỉ lấy số). Bỏ qua tất cả các dòng không liên quan. Trả về kết quả dưới dạng một mảng JSON. Mỗi đối tượng trong mảng phải có hai thuộc tính: "description" (string) và "amount" (number). Nếu không tìm thấy mục nào, trả về một mảng rỗng. Ví dụ: [{"description": "Thưởng thi đua doanh số tháng 5", "amount": 500000}]`;
+
+        const imageProcessPromises = bonusImages.map(async (image) => {
+            const base64Data = await blobToBase64(image);
+            const imagePart = {
+                inlineData: {
+                    mimeType: image.type,
+                    data: base64Data,
+                },
+            };
+
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: { parts: [imagePart, { text: prompt }] },
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                description: { type: Type.STRING },
+                                amount: { type: Type.NUMBER },
+                            },
+                            required: ["description", "amount"],
+                        },
+                    },
+                },
+            });
+            const jsonText = response.text.trim();
+            return JSON.parse(jsonText);
+        });
+
+        const results = await Promise.allSettled(imageProcessPromises);
+        
+        const allBonuses: BonusItem[] = [];
+        results.forEach(result => {
+            if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+                allBonuses.push(...result.value);
+            } else if (result.status === 'rejected') {
+                console.error("Một ảnh xử lý thất bại:", result.reason);
+            }
+        });
+
+        if (allBonuses.length > 0) {
+            setExtractedBonuses(allBonuses);
+        } else {
+            setImageError('Không tìm thấy khoản thưởng nào hợp lệ trong các ảnh đã tải lên.');
+        }
+
+    } catch (err) {
+        console.error("Lỗi khi xử lý ảnh:", err);
+        setImageError('Đã xảy ra lỗi khi phân tích hình ảnh. Vui lòng thử lại.');
+    } finally {
+        setIsProcessingImage(false);
+    }
+  };
+  
+  const handleBonusFilterToggle = (description: string) => {
+    setSelectedBonusDescriptions(prev => 
+        prev.includes(description)
+            ? prev.filter(d => d !== description)
+            : [...prev, description]
+    );
+  };
+  
+  const bonusFilterOptions = useMemo(() => {
+    return [...new Set(extractedBonuses.map(b => b.description))].sort();
+  }, [extractedBonuses]);
+
+  useEffect(() => {
+    if (extractedBonuses.length > 0) {
+        setSelectedBonusDescriptions(bonusFilterOptions);
+    }
+  }, [extractedBonuses, bonusFilterOptions]);
+
+
+  const filteredExtractedBonuses = useMemo(() => {
+    if (selectedBonusDescriptions.length === 0 && extractedBonuses.length > 0) return [];
+    if (selectedBonusDescriptions.length === bonusFilterOptions.length) return extractedBonuses;
+
+    const selectedSet = new Set(selectedBonusDescriptions);
+    return extractedBonuses.filter(b => selectedSet.has(b.description));
+  }, [extractedBonuses, selectedBonusDescriptions, bonusFilterOptions]);
+
+  const totalBonusFromImage = useMemo(() => {
+    return filteredExtractedBonuses.reduce((sum, item) => sum + item.amount, 0);
+  }, [filteredExtractedBonuses]);
 
 
   // --- Navigation & Rendering ---
   const navItemClasses = (page: Page) => 
-    `flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-white ${
+    `flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-white ${
         currentPage === page ? 'bg-indigo-100 text-indigo-700' : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
     }`;
     
@@ -2118,10 +2099,12 @@ export const App: React.FC = () => {
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-purple-600 transition-colors duration-300">Thay POSM</h2>
                 </div>
-                
+
                 <div onClick={() => handleFeatureClick('ma-qr')} className={`group bg-white p-6 py-8 rounded-2xl shadow-sm border border-slate-200/80 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center ${isFeatureLocked('ma-qr') ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-slate-500 hover:shadow-xl hover:-translate-y-1'}`}>
                     <div className="flex-shrink-0 bg-slate-100 text-slate-600 rounded-full w-20 h-20 flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-slate-200">
-                        <span className="material-symbols-outlined" style={{ fontSize: '40px' }}>qr_code_2</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M4 4h6v6H4V4zm2 2v2h2V6H6zM4 14h6v6H4v-6zm2 2v2h2v-2H6zM14 4h6v6h-6V4zm2 2v2h2V6h-2zM19 14h1v1h-1v-1zm-2 2h1v1h-1v-1zm-2 2h1v1h-1v-1zm-2 0h1v1h-1v-1zm4 2h1v1h-1v-1zm2-4h1v1h-1v-1zm-4-2h1v1h-1v-1zm2 0h1v1h-1v-1zm2-2h1v1h-1v-1zm-4 0h1v1h-1v-1zm2-2h1v1h-1v-1z" />
+                        </svg>
                     </div>
                     <h2 className="text-base font-bold text-slate-800 group-hover:text-slate-600 transition-colors duration-300">Tạo Mã QR / Barcode</h2>
                 </div>
@@ -2844,29 +2827,32 @@ export const App: React.FC = () => {
                             Phiên bản hiện tại
                         </h2>
                         <div>
-                            <div>
-                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                                    <span className="bg-indigo-600 text-white font-bold text-sm px-3 py-1 rounded-full">v1.6.0</span>
-                                    <h3 className="text-lg font-semibold text-slate-800">Cải Thiện & Tính Năng Mới</h3>
-                                </div>
-                                <ul className="mt-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
-                                    <li className="relative pl-2">
-                                        <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-green-300"></span>
-                                        <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[TÍNH NĂNG MỚI]</span>
-                                        Tạo Mã Vạch: Bổ sung tính năng tạo Barcode (Mã vạch) cho phép in ấn trực tiếp, bên cạnh Mã QR hiện có.
-                                    </li>
-                                    <li className="relative pl-2">
-                                        <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-purple-300"></span>
-                                        <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-purple-100 text-purple-800">[THUẬT TOÁN]</span>
-                                        Nâng cấp Thay POSM: Cải thiện thuật toán nhận diện cột Excel thông minh hơn, xử lý tốt các file phức tạp (như điện lạnh) để nhận diện chính xác Giá gốc/Giá mới.
-                                    </li>
-                                    <li className="relative pl-2">
-                                        <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-green-300"></span>
-                                        <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[TÍNH NĂNG MỚI]</span>
-                                        Hệ thống báo lỗi nâng cao: Thay thế nút báo lỗi cũ bằng biểu mẫu chi tiết, cho phép đính kèm ảnh chụp màn hình để phản hồi chính xác hơn.
-                                    </li>
-                                </ul>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                <span className="bg-indigo-600 text-white font-bold text-sm px-3 py-1 rounded-full">v2.0.0</span>
+                                <h3 className="text-lg font-semibold text-slate-800">Giao Diện Mới & Nâng Cấp Chức Năng</h3>
                             </div>
+                            <ul className="mt-4 space-y-2.5 border-l-2 border-slate-200 pl-6 text-slate-600">
+                                <li className="relative pl-2">
+                                    <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-green-300"></span>
+                                    <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[ĐIỂM NHẤN]</span>
+                                    Giao diện Trang Chủ được thiết kế lại hoàn toàn theo dạng lưới 6 cột hiện đại, trực quan, cùng hiệu ứng tương tác sinh động.
+                                </li>
+                                <li className="relative pl-2">
+                                    <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span>
+                                    <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[NÂNG CẤP]</span>
+                                    Tính năng "Tính Thưởng" tích hợp thanh toán nhanh qua mã VietQR, bộ lọc thông minh hơn và làm tròn số tiền đến hàng nghìn.
+                                </li>
+                                <li className="relative pl-2">
+                                    <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-green-300"></span>
+                                    <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-green-100 text-green-800">[TÍNH NĂNG MỚI]</span>
+                                    Bổ sung khả năng tạo Mã Vạch (Barcode) bên cạnh Mã QR, tăng tính linh hoạt cho người dùng.
+                                </li>
+                                 <li className="relative pl-2">
+                                    <span className="absolute -left-[30px] top-1.5 h-2 w-2 rounded-full bg-blue-300"></span>
+                                    <span className="font-semibold text-xs px-2 py-0.5 rounded-full mr-2 bg-blue-100 text-blue-800">[NÂNG CẤP]</span>
+                                    Giao diện các chức năng được đồng bộ bằng bộ icon mới từ thư viện Lucide, mang lại cảm giác chuyên nghiệp hơn.
+                                </li>
+                            </ul>
                         </div>
                         <div className="mt-8 pt-6 border-t border-slate-200">
                             <h3 className="text-xl font-bold text-slate-800 mb-3 flex items-center gap-3">
@@ -2888,17 +2874,19 @@ export const App: React.FC = () => {
 
                     <div className="space-y-6">
                         {isFree && (
-                             <div className="bg-white p-6 rounded-xl shadow-lg border-2 border-slate-200 relative overflow-hidden">
+                             <div className="bg-white p-6 rounded-xl shadow-lg border-2 border-amber-400 relative overflow-hidden">
                                 <div className="flex items-center gap-4 mb-4 relative z-10">
-                                    <div className="flex-shrink-0 bg-slate-100 text-slate-500 rounded-full p-2.5 inline-flex">
+                                    <div className="flex-shrink-0 bg-amber-100 text-amber-600 rounded-full p-2.5 inline-flex">
                                         <span className="material-symbols-outlined">workspace_premium</span>
                                     </div>
-                                    <h2 className="text-xl font-bold text-slate-700">Nâng Cấp Tài Khoản VIP</h2>
+                                    <h2 className="text-xl font-bold text-amber-800">Nâng Cấp Tài Khoản VIP</h2>
                                 </div>
-                                <p className="text-slate-500 mb-5 text-sm relative z-10">Tính năng nâng cấp tạm thời bị khóa để bảo trì hệ thống. Vui lòng quay lại sau.</p>
-                                <button disabled className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-300 text-white font-bold rounded-lg border border-slate-300 cursor-not-allowed relative z-10">
-                                    Tạm khóa bảo trì
+                                <p className="text-slate-600 mb-5 text-sm relative z-10">Mở khóa toàn bộ tính năng mạnh mẽ của ứng dụng. Chỉ với <span className="font-bold text-slate-900">10.000đ</span> cho 30 ngày sử dụng.</p>
+                                <button onClick={handleUpgradeToVip} className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 text-white font-bold rounded-lg border border-amber-600 hover:bg-amber-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 transition-colors duration-200 relative z-10">
+                                    Nâng cấp VIP (10.000đ / 30 ngày)
                                 </button>
+                                {/* Decorative background blur */}
+                                <div className="absolute -top-10 -right-10 w-32 h-32 bg-yellow-200 rounded-full blur-3xl opacity-50"></div>
                             </div>
                         )}
                         <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200/80">
@@ -2935,281 +2923,244 @@ export const App: React.FC = () => {
                 </div>
             </div>
           );
+       case 'tinh-thuong':
+        const employeeShare = (totalBonusFromImage * 0.7) / 3;
+        return (
+            <div className="w-full max-w-7xl mx-auto space-y-8">
+                <header className="text-center">
+                    <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">TÍNH THƯỞNG</h1>
+                </header>
+
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start">
+                    {/* Cột Trái: Tải ảnh và Bảng kết quả */}
+                    <div className="lg:col-span-3 bg-white p-6 rounded-xl shadow-md border border-slate-200/80 space-y-6">
+                        <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-3">
+                            <LucideIcon name="image-plus" className="text-slate-600" size={24}/>
+                            Tải ảnh lên
+                        </h2>
+                        
+                        <div className="flex flex-col sm:flex-row items-center gap-4">
+                            <label htmlFor="bonus-image-upload" className="flex-grow w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 bg-white text-slate-700 border border-slate-300 font-semibold rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-400 cursor-pointer transition-colors duration-200 text-sm">
+                                <span className="material-symbols-outlined">upload_file</span>
+                                {bonusImages.length > 0 ? `${bonusImages.length} ảnh đã chọn` : 'Chọn ảnh để tải lên...'}
+                            </label>
+                            <input id="bonus-image-upload" type="file" className="hidden" accept="image/*" onChange={handleBonusImageChange} multiple />
+                             <button
+                                onClick={handleProcessImage}
+                                disabled={bonusImages.length === 0 || isProcessingImage}
+                                className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200 disabled:bg-slate-400 disabled:cursor-not-allowed"
+                            >
+                                {isProcessingImage ? (
+                                    <>
+                                       <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        <span>Đang xử lý...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <LucideIcon name="refresh-ccw" size={20}/>
+                                        <span>Tính Toán</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+
+                        {bonusImagePreviews.length > 0 && (
+                            <div className="mt-2 p-2 border bg-slate-50 border-slate-200 rounded-lg">
+                                <div className="flex flex-wrap gap-2">
+                                    {bonusImagePreviews.map((preview, index) => (
+                                         <img key={index} src={preview} alt={`Xem trước ảnh ${index + 1}`} className="h-20 w-20 object-cover rounded" />
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        
+                        {imageError && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">{imageError}</p>}
+                        
+                        {extractedBonuses.length > 0 && (
+                            <div className="pt-4 border-t border-slate-200 space-y-4">
+                                <div>
+                                    <div className="flex justify-between items-center mb-3">
+                                        <h3 className="text-lg font-semibold text-slate-800">Các khoản thưởng được nhận diện:</h3>
+                                        {bonusFilterOptions.length > 1 && (
+                                            <div ref={filterMenuRef} className="relative">
+                                                <button
+                                                    onClick={() => setIsFilterMenuOpen(!isFilterMenuOpen)}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-white text-slate-700 border border-slate-300 font-semibold rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500"
+                                                >
+                                                    <span className="material-symbols-outlined text-base">filter_alt</span>
+                                                    <span>Lọc</span>
+                                                </button>
+                                                {isFilterMenuOpen && (
+                                                    <div className="absolute right-0 mt-2 w-72 bg-white rounded-md shadow-lg py-2 ring-1 ring-black ring-opacity-5 z-20 max-h-60 overflow-y-auto">
+                                                        <div className="px-3 py-1 border-b border-slate-200">
+                                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                                                    checked={selectedBonusDescriptions.length === bonusFilterOptions.length}
+                                                                    onChange={(e) => {
+                                                                        setSelectedBonusDescriptions(e.target.checked ? bonusFilterOptions : []);
+                                                                    }}
+                                                                />
+                                                                <span className="text-sm font-semibold text-slate-700">Chọn tất cả</span>
+                                                            </label>
+                                                        </div>
+                                                        {bonusFilterOptions.map(option => (
+                                                            <div key={option} className="px-3 py-1.5 hover:bg-slate-50">
+                                                                <label className="flex items-center gap-2 cursor-pointer w-full">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                                                        checked={selectedBonusDescriptions.includes(option)}
+                                                                        onChange={() => handleBonusFilterToggle(option)}
+                                                                    />
+                                                                    <span className="text-sm text-slate-600 truncate">{option}</span>
+                                                                </label>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm text-left text-slate-600">
+                                            <thead className="text-xs text-slate-700 uppercase bg-slate-50">
+                                                <tr>
+                                                    <th scope="col" className="px-4 py-2">Nội dung thưởng</th>
+                                                    <th scope="col" className="px-4 py-2 w-40 text-right">Số tiền</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {filteredExtractedBonuses.length > 0 ? (
+                                                    filteredExtractedBonuses.map((item, index) => (
+                                                        <tr key={index} className="bg-white border-b hover:bg-slate-50">
+                                                            <td className="px-4 py-2 font-medium text-slate-800">{item.description}</td>
+                                                            <td className="px-4 py-2 text-right font-mono font-semibold text-green-600">{formatCurrency(item.amount)}</td>
+                                                        </tr>
+                                                    ))
+                                                ) : (
+                                                    <tr>
+                                                        <td colSpan={2} className="text-center py-4 text-slate-500">Không có mục nào được chọn.</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                            <tfoot className="font-bold">
+                                                <tr className="bg-slate-50">
+                                                    <td className="px-4 py-2 text-right text-slate-800">Tổng cộng ({filteredExtractedBonuses.length} mục)</td>
+                                                    <td className="px-4 py-2 text-right text-lg text-indigo-600 font-mono">{formatCurrency(totalBonusFromImage)}</td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    
+                    {/* Cột Phải: Phân chia thưởng */}
+                    <div className="lg:col-span-2 lg:sticky lg:top-24 space-y-6">
+                         {totalBonusFromImage > 0 && (
+                             <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80 space-y-6">
+                                <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-3">
+                                    <LucideIcon name="chart-no-axes-combined" className="text-slate-600" size={24}/>
+                                    Tổng hợp &amp; Phân Chia
+                                </h2>
+                                <StatCard title="Chi tiết thưởng" value={formatCurrency(totalBonusFromImage)} className="!bg-green-100/80 !border-green-200" />
+                                <div>
+                                    <label htmlFor="bonus-deduction" className="text-sm font-semibold text-slate-600 mb-1 block">Tiền cấn trừ (truy thu, chi khác...)</label>
+                                    <input
+                                        id="bonus-deduction"
+                                        type="text"
+                                        inputMode="numeric"
+                                        value={formatNumber(bonusDeduction)}
+                                        onChange={handleBonusDeductionChange}
+                                        placeholder="0"
+                                        className="w-full bg-white border border-slate-300 rounded-lg py-2 px-3 text-right text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-semibold"
+                                    />
+                                </div>
+                                <StatCard title="Tổng thực nhận" value={formatCurrency(totalBonusFromImage - bonusDeduction)} className="!bg-blue-100/80 !border-blue-200" />
+
+                                <div className="pt-2 space-y-4">
+                                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                                        <h3 className="font-bold text-slate-700">Quản lý (30%)</h3>
+                                        <p className="font-mono text-xl font-bold text-indigo-600">{formatCurrency(Math.round(totalBonusFromImage * 0.3))}</p>
+                                    </div>
+                                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                                        <h3 className="font-bold text-slate-700">Nhân viên (70%): <span className="font-mono font-semibold text-slate-600">{formatCurrency(Math.round(totalBonusFromImage * 0.7))}</span></h3>
+                                        <ul className="divide-y divide-slate-200">
+                                            {employees.map(employee => (
+                                                <li key={employee.accountNumber} className="flex justify-between items-center py-2 gap-4">
+                                                    <div>
+                                                        <p className="font-bold text-slate-800">{employee.name}</p>
+                                                        <p className="font-mono font-semibold text-slate-800">{formatCurrency(Math.round(employeeShare))}</p>
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => setQrModalData({ employee, amount: Math.round(employeeShare) })}
+                                                        className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white text-slate-700 border border-slate-300 font-semibold rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500"
+                                                    >
+                                                        <span className="material-symbols-outlined text-sm">qr_code_2</span>
+                                                        Hiện QR
+                                                    </button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
       case 'ma-qr':
         return (
             <div className="w-full max-w-2xl mx-auto">
                 <header className="text-center mb-8">
-                    <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">TẠO MÃ QR / BARCODE</h1>
+                    <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">TẠO MÃ QR & MÃ VẠCH</h1>
                 </header>
                 <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
-                    
-                    <div className="flex justify-center mb-6">
-                        <div className="inline-flex rounded-md shadow-sm" role="group">
-                            <button
-                                type="button"
-                                onClick={() => setCodeType('qr')}
-                                className={`px-4 py-2 text-sm font-medium border rounded-l-lg focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:text-indigo-700 ${codeType === 'qr' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
-                            >
-                                Mã QR (QR Code)
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setCodeType('barcode')}
-                                className={`px-4 py-2 text-sm font-medium border rounded-r-lg focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:text-indigo-700 ${codeType === 'barcode' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
-                            >
-                                Mã Vạch (Barcode)
-                            </button>
-                        </div>
+                    <div className="flex justify-center mb-6 border-b border-slate-200">
+                        <button onClick={() => setGeneratorType('qr')} className={`px-6 py-3 font-semibold text-sm transition-colors ${generatorType === 'qr' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}>
+                            Mã QR
+                        </button>
+                        <button onClick={() => setGeneratorType('barcode')} className={`px-6 py-3 font-semibold text-sm transition-colors ${generatorType === 'barcode' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}>
+                            Mã Vạch (Barcode)
+                        </button>
                     </div>
-
                     <div>
                         <label htmlFor="qr-input" className="block text-sm font-semibold text-slate-700 mb-2">
-                            Nội dung mã {codeType === 'qr' ? 'QR' : 'Vạch'}
+                            Nội dung
                         </label>
                         <input
                             id="qr-input"
                             type="text"
                             value={qrGeneratorText}
                             onChange={(e) => setQrGeneratorText(e.target.value)}
-                            placeholder={codeType === 'qr' ? "Nhập văn bản hoặc liên kết..." : "Nhập mã số hoặc ký tự..."}
+                            placeholder="Nhập văn bản hoặc liên kết vào đây..."
                             className="w-full p-3 bg-white border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
                         />
                     </div>
-                    
                     {qrGeneratorText && (
                         <div className="mt-6 pt-6 border-t border-slate-200 flex flex-col items-center">
-                            <h3 className="text-lg font-semibold text-slate-800 mb-4">Kết quả của bạn:</h3>
-                            <div className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm inline-block mb-4">
-                                {codeType === 'qr' ? (
+                            <h3 className="text-lg font-semibold text-slate-800 mb-4">
+                                {generatorType === 'qr' ? 'Mã QR của bạn:' : 'Mã Vạch của bạn:'}
+                            </h3>
+                            <div className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm inline-block">
+                                {generatorType === 'qr' ? (
                                     <QRCodeComponent text={qrGeneratorText} size={256} />
                                 ) : (
                                     <BarcodeComponent text={qrGeneratorText} />
                                 )}
                             </div>
-                            {codeType === 'barcode' && (
-                                <button 
-                                    onClick={handlePrintBarcode}
-                                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white font-semibold rounded-lg hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-800 transition-colors"
-                                >
-                                    <span className="material-symbols-outlined">print</span>
-                                    In Mã Vạch
-                                </button>
-                            )}
                         </div>
                     )}
                 </div>
             </div>
         );
-      case 'tinh-thuong':
-          return (
-              <div className="w-full max-w-4xl mx-auto">
-                  <header className="text-center mb-8 flex flex-col items-center">
-                      <div className="flex items-center justify-center">
-                        <span className="material-symbols-outlined text-4xl text-indigo-600 mr-2">paid</span>
-                        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">TÍNH THƯỞNG</h1>
-                      </div>
-                  </header>
-
-                  <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
-                      <div className="mb-6">
-                          <label className="block text-sm font-semibold text-slate-700 mb-2">Tải lên hình ảnh phiếu lương/thưởng</label>
-                          <div className="flex items-center justify-center w-full">
-                              <label htmlFor="dropzone-file" className="flex flex-col items-center justify-center w-full h-48 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
-                                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                      <span className="material-symbols-outlined text-6xl text-slate-300 mb-3">cloud_upload</span>
-                                      <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">Nhấn để tải lên</span> hoặc kéo thả</p>
-                                  </div>
-                                  <input id="dropzone-file" type="file" className="hidden" multiple accept="image/*" onChange={handleBonusImageUpload} />
-                              </label>
-                          </div>
-                      </div>
-
-                      {bonusImages.length > 0 && (
-                          <div className="mb-6">
-                              <p className="text-sm font-medium text-slate-700 mb-2">Đã chọn {bonusImages.length} hình ảnh:</p>
-                              <div className="flex flex-wrap gap-2">
-                                  {bonusImages.map((file, idx) => (
-                                      <div key={idx} className="relative group">
-                                          <div className="w-20 h-20 rounded-md overflow-hidden border border-slate-200">
-                                              <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-full object-cover" />
-                                          </div>
-                                      </div>
-                                  ))}
-                              </div>
-                          </div>
-                      )}
-
-                      <div className="flex justify-center">
-                          <button
-                              onClick={handleAnalyzeBonus}
-                              disabled={isAnalyzingBonus || bonusImages.length === 0}
-                              className={`flex items-center gap-2 px-6 py-3 font-semibold rounded-lg shadow-md text-white transition-all ${
-                                  isAnalyzingBonus || bonusImages.length === 0
-                                      ? 'bg-slate-400 cursor-not-allowed'
-                                      : 'bg-orange-600 hover:bg-orange-700 hover:shadow-lg'
-                              }`}
-                          >
-                              {isAnalyzingBonus && bonusAnalysisProgress ? (
-                                  <>
-                                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                      </svg>
-                                      <span>{`${bonusAnalysisProgress.status} (${bonusAnalysisProgress.progress}%)`}</span>
-                                  </>
-                              ) : isAnalyzingBonus ? (
-                                  <>
-                                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                      </svg>
-                                      Đang khởi tạo...
-                                  </>
-                              ) : (
-                                  <>
-                                      <span className="material-symbols-outlined">analytics</span>
-                                      Phân tích & Tính thưởng
-                                  </>
-                              )}
-                          </button>
-                      </div>
-                  </div>
-
-                  {bonusItems.length > 0 && (
-                      <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-                          {/* Kết quả phân tích */}
-                          <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80">
-                              <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                                    <span className="material-symbols-outlined text-blue-600">receipt_long</span>
-                                    Chi Tiết Thu Nhập
-                                </h3>
-                                <div ref={bonusFilterDropdownRef} className="relative">
-                                  <button 
-                                      onClick={() => setIsBonusFilterDropdownOpen(!isBonusFilterDropdownOpen)}
-                                      className={`p-2 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${isBonusFilterDropdownOpen ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                                      title="Lọc các khoản thu nhập"
-                                  >
-                                      <span className="material-symbols-outlined">filter_alt</span>
-                                  </button>
-                                  {isBonusFilterDropdownOpen && (
-                                    <div className="absolute right-0 mt-2 w-72 bg-white rounded-md shadow-lg py-2 ring-1 ring-black ring-opacity-5 z-20">
-                                      <div className="px-3 py-1 text-xs font-semibold text-slate-500 uppercase">Chọn khoản thu nhập</div>
-                                      <div className="max-h-60 overflow-y-auto mt-1">
-                                        {bonusItems.map((item, index) => (
-                                          <label key={index} className="flex items-center gap-3 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={!excludedBonusIndices.includes(index)}
-                                                onChange={() => toggleBonusItem(index)}
-                                                className="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500"
-                                            />
-                                            <span className="flex-grow">{item.description}</span>
-                                            <span className="font-mono text-xs">{formatCurrency(item.amount)}</span>
-                                          </label>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              
-                              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                                  {activeBonusItems.length > 0 ? (activeBonusItems.map((item, index) => {
-                                      const originalIndex = bonusItems.findIndex(bi => bi.description === item.description && bi.amount === item.amount);
-                                      return (
-                                        <div key={originalIndex} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-100">
-                                            <span className="font-medium text-slate-700">{item.description}</span>
-                                            <span className="font-mono font-bold text-slate-900">{formatCurrency(item.amount)}</span>
-                                        </div>
-                                    )})
-                                  ) : (
-                                      <div className="text-center py-4 text-slate-500 italic">
-                                        {bonusItems.length > 0 ? 'Không có khoản nào được chọn.' : 'Không tìm thấy khoản thu nhập nào.'}
-                                      </div>
-                                  )}
-                              </div>
-                              
-                              <div className="pt-3 mt-3 border-t border-slate-200 flex justify-between items-center">
-                                  <span className="font-bold text-lg text-slate-800">TỔNG CỘNG</span>
-                                  <span className="font-mono font-bold text-xl text-indigo-600">{formatCurrency(totalBonus)}</span>
-                              </div>
-                          </div>
-
-                          {/* Bảng phân chia */}
-                          <div className="bg-white p-6 rounded-xl shadow-md border border-slate-200/80 h-fit">
-                              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                  <span className="material-symbols-outlined text-green-600">pie_chart</span>
-                                  Bảng Phân Chia Thưởng
-                              </h3>
-                              
-                              <div className="mb-6">
-                                  <h4 className="text-sm font-semibold text-slate-500 uppercase mb-2">Phần Quản Lý (30%)</h4>
-                                  <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-lg flex justify-between items-center">
-                                      <span className="font-medium text-indigo-900">Quản Lý</span>
-                                      <span className="font-mono font-bold text-xl text-indigo-700">{formatCurrency(managerShare)}</span>
-                                  </div>
-                              </div>
-
-                              <div>
-                                  <h4 className="text-sm font-semibold text-slate-500 uppercase mb-2 flex justify-between items-center">
-                                      <span>Phần Nhân Sự (70%)</span>
-                                      <span className="font-mono text-slate-700">{formatCurrency(staffShare)}</span>
-                                  </h4>
-                                  
-                                  <div className="mb-3 flex items-center gap-2">
-                                      <label htmlFor="deduction" className="text-sm font-medium text-slate-600 whitespace-nowrap">Trừ (Truy thu/Chi):</label>
-                                      <input 
-                                          id="deduction"
-                                          type="text" 
-                                          inputMode="numeric"
-                                          value={formatNumber(bonusDeduction)}
-                                          onChange={handleBonusDeductionChange}
-                                          placeholder="0"
-                                          className="w-full p-2 text-right text-sm border border-slate-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                                      />
-                                  </div>
-
-                                  <div className="bg-slate-50 border border-slate-200 rounded-lg overflow-hidden">
-                                      <table className="w-full text-sm text-left">
-                                          <thead className="bg-slate-100 text-slate-600 font-semibold">
-                                              <tr>
-                                                  <th className="px-4 py-2">Tên Nhân Sự</th>
-                                                  <th className="px-4 py-2 text-right">Thực Lĩnh</th>
-                                              </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-slate-200">
-                                              {staffMembers.map((staff, idx) => {
-                                                  const qrLink = `https://img.vietqr.io/image/${staff.bank}-${staff.account}-compact2.png?amount=${perStaffShare}&addInfo=${encodeURIComponent(`Chuyen tien thuong`)}&accountName=${encodeURIComponent(staff.name)}`;
-                                                  return (
-                                                      <tr key={idx}>
-                                                          <td className="px-4 py-3 font-medium text-slate-800">
-                                                              <div className="flex items-center justify-between">
-                                                                  <span>{staff.name}</span>
-                                                                  {perStaffShare > 0 && (
-                                                                      <button 
-                                                                          onClick={() => setQrModalData({ name: staff.name, qrLink: qrLink })}
-                                                                          className="p-1 rounded-full text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500"
-                                                                          title={`Tạo QR thanh toán cho ${staff.name}`}
-                                                                      >
-                                                                          <span className="material-symbols-outlined" style={{ verticalAlign: 'middle' }}>qr_code_scanner</span>
-                                                                      </button>
-                                                                  )}
-                                                              </div>
-                                                          </td>
-                                                          <td className="px-4 py-3 text-right font-mono font-bold text-green-700">{formatCurrency(perStaffShare)}</td>
-                                                      </tr>
-                                                  );
-                                              })}
-                                          </tbody>
-                                      </table>
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-                  )}
-              </div>
-          );
       default:
         return null;
     }
@@ -3325,6 +3276,8 @@ export const App: React.FC = () => {
     );
   }
 
+  const isFeaturePageActive = currentPage === 'tinh-thuong' || currentPage === 'ma-qr';
+
   return (
     <div className="min-h-screen font-sans flex flex-col">
        <header className="bg-white/80 backdrop-blur-sm shadow-sm sticky top-0 z-40 border-b border-slate-200/80">
@@ -3361,30 +3314,32 @@ export const App: React.FC = () => {
                             </svg>
                             <span className="hidden sm:inline">Thay POSM</span>
                         </button>
-                        
-                        <div ref={featureMenuRef} className="relative">
-                            <button onClick={() => setIsFeatureMenuOpen(!isFeatureMenuOpen)} className={`flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-white text-slate-700 hover:bg-slate-100 hover:text-slate-900`}>
-                                <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>widgets</span>
+                        <div ref={featuresMenuRef} className="relative">
+                            <button
+                                onClick={() => setIsFeaturesMenuOpen(!isFeaturesMenuOpen)}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-white ${
+                                    isFeaturePageActive ? 'bg-indigo-100 text-indigo-700' : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+                                }`}
+                            >
+                                <span className="material-symbols-outlined" style={{ fontSize: '22px' }}>apps</span>
                                 <span className="hidden sm:inline">Chức năng</span>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
+                                <span className="material-symbols-outlined text-base transition-transform duration-200" style={{ transform: isFeaturesMenuOpen ? 'rotate(180deg)' : 'rotate(0deg)'}}>arrow_drop_down</span>
                             </button>
-                            {isFeatureMenuOpen && (
-                                <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5 z-50">
+                            {isFeaturesMenuOpen && (
+                                <div className="absolute left-0 sm:left-1/2 sm:-translate-x-1/2 mt-2 w-48 bg-white rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5 z-50">
                                     <button
-                                        onClick={() => { handleFeatureClick('ma-qr'); setIsFeatureMenuOpen(false); }}
-                                        className={`w-full text-left flex items-center gap-3 px-4 py-2 text-sm ${isFeatureLocked('ma-qr') ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-slate-100'}`}
+                                        onClick={() => { handleFeatureClick('tinh-thuong'); setIsFeaturesMenuOpen(false); }}
+                                        className={`w-full text-left flex items-center gap-3 px-4 py-2 text-sm ${currentPage === 'tinh-thuong' ? 'font-semibold text-indigo-600 bg-indigo-50' : 'text-slate-700'} hover:bg-slate-100 ${isFeatureLocked('tinh-thuong') ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     >
-                                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>qr_code_2</span>
-                                        <span>Tạo Mã QR / Barcode</span>
+                                        <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>paid</span>
+                                        <span>Tính Thưởng</span>
                                     </button>
                                     <button
-                                        onClick={() => { handleFeatureClick('tinh-thuong'); setIsFeatureMenuOpen(false); }}
-                                        className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                                        onClick={() => { handleFeatureClick('ma-qr'); setIsFeaturesMenuOpen(false); }}
+                                        className={`w-full text-left flex items-center gap-3 px-4 py-2 text-sm ${currentPage === 'ma-qr' ? 'font-semibold text-indigo-600 bg-indigo-50' : 'text-slate-700'} hover:bg-slate-100 ${isFeatureLocked('ma-qr') ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     >
-                                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>paid</span>
-                                        <span>Tính Thưởng</span>
+                                        <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>qr_code_2</span>
+                                        <span>Tạo Mã QR</span>
                                     </button>
                                 </div>
                             )}
@@ -3527,61 +3482,62 @@ export const App: React.FC = () => {
                     <div className="p-2 border-2 border-amber-200 rounded-xl bg-amber-50">
                         <img 
                             src={`https://img.vietqr.io/image/MB-031119939-compact2.png?amount=10000&addInfo=VIP%20${currentUser?.username}&accountName=DAO%20THE%20ANH`}
-                            alt="VietQR MBBank" 
-                            width="256" 
-                            height="256"
-                            className="rounded-lg"
+                            alt="VietQR MB Bank"
+                            className="w-64 h-64"
                         />
                     </div>
-
-                    <div className="w-full text-left bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
-                        <p className="font-semibold text-slate-800">Chủ tài khoản: DAO THE ANH</p>
-                        <p className="font-semibold text-slate-800">Ngân hàng: MB Bank</p>
-                        <p className="font-semibold text-slate-800">Nội dung CK: <span className="font-mono text-red-600">VIP {currentUser?.username}</span></p>
-                    </div>
-
-                    <button
+                    <p className="text-xs text-slate-500 max-w-sm">
+                        Nội dung chuyển khoản đã được tạo sẵn. Sau khi thanh toán, nhấn nút "Xác nhận đã thanh toán" để kích hoạt VIP.
+                    </p>
+                </div>
+                 <div className="p-4 bg-slate-50 border-t border-slate-200">
+                    <button 
                         onClick={handleConfirmVipPayment}
                         disabled={isVerifyingPayment}
-                        className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 font-bold rounded-lg transition-colors text-white ${
-                            isVerifyingPayment
-                                ? 'bg-slate-400 cursor-wait'
-                                : 'bg-green-600 hover:bg-green-700'
-                        }`}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed"
                     >
-                        {isVerifyingPayment ? (
+                         {isVerifyingPayment ? (
                             <>
-                                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                                <span>Đang xác thực giao dịch...</span>
+                               <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Đang xác thực...
                             </>
                         ) : (
-                            <>
-                                <span className="material-symbols-outlined">verified</span>
-                                <span>Đã thanh toán - Kích hoạt ngay</span>
-                            </>
+                            "Xác nhận đã thanh toán"
                         )}
                     </button>
-
-                    <p className="text-xs text-slate-500">
-                        Sau khi thanh toán thành công, nhấn nút trên để kích hoạt. 
-                        Nếu gặp sự cố, vui lòng liên hệ hỗ trợ.
-                    </p>
                 </div>
             </div>
         </div>
     )}
 
-    {qrModalData && (
+     {qrModalData && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={() => setQrModalData(null)}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-xs flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                <header className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                    <h3 className="font-bold text-slate-800">QR thanh toán cho {qrModalData.name}</h3>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <div className="p-4 flex justify-between items-center border-b border-slate-200">
+                    <h2 className="text-lg font-bold text-slate-800">Chuyển Khoản Thưởng</h2>
                     <button onClick={() => setQrModalData(null)} className="text-slate-500 hover:text-slate-800 transition-colors">
                         <span className="material-symbols-outlined">close</span>
                     </button>
-                </header>
-                <div className="p-6 flex justify-center">
-                    <img src={qrModalData.qrLink} alt={`QR Code for ${qrModalData.name}`} className="w-full h-auto rounded-lg border border-slate-200" />
+                </div>
+                <div className="p-6 flex flex-col items-center text-center space-y-4">
+                    <p className="text-slate-600 text-sm">
+                        Quét mã QR để chuyển <span className="font-bold text-red-600">{formatCurrency(qrModalData.amount)}</span> cho <span className="font-bold text-slate-800">{qrModalData.employee.name}</span>.
+                    </p>
+                    
+                    <div className="p-2 border border-slate-200 rounded-lg bg-slate-50">
+                       <img 
+                            src={`https://img.vietqr.io/image/${qrModalData.employee.bankBin}-${qrModalData.employee.accountNumber}-compact2.png?amount=${qrModalData.amount}&addInfo=Thuong%20thang`}
+                            alt={`QR Code for ${qrModalData.employee.name}`}
+                            className="w-64 h-64"
+                        />
+                    </div>
+                    <div className="text-sm text-slate-600">
+                        <p><span className="font-semibold">Ngân hàng:</span> {qrModalData.employee.bank}</p>
+                        <p><span className="font-semibold">STK:</span> {qrModalData.employee.accountNumber}</p>
+                    </div>
                 </div>
             </div>
         </div>
