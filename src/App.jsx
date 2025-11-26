@@ -1,14 +1,11 @@
 import React, { useState } from 'react';
-/* 1. Sửa lại import đúng chuẩn thư viện đã cài */
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
-/* 2. Lấy API Key (Nhớ file .env phải có VITE_GEMINI_API_KEY) */
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(API_KEY);
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 function App() {
   const [images, setImages] = useState([]);
-  const [results, setResults] = useState([]); // Lưu danh sách các khoản thưởng
+  const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [totalMoney, setTotalMoney] = useState(0);
 
@@ -44,8 +41,6 @@ function App() {
     setResults([]);
 
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
       // Chuẩn bị dữ liệu ảnh gửi đi
       const imageParts = await Promise.all(images.map(fileToGenerativePart));
 
@@ -56,7 +51,7 @@ function App() {
         Yêu cầu xử lý:
         1. Tìm tất cả các dòng có nội dung là khoản thưởng (Ví dụ: "Thưởng thi đua", "Thưởng nộp tiền NH", "Khoán công việc", "Thưởng nóng"...).
         2. Lấy chính xác tên khoản thưởng (đầy đủ nguyên văn, không viết tắt) và số tiền.
-        3. Trả về kết quả CHỈ LÀ MỘT MẢNG JSON thuần túy, không có Markdown (```json), không có lời dẫn.
+        3. Trả về kết quả CHỈ LÀ MỘT MẢNG JSON thuần túy, không có Markdown (json), không có lời dẫn.
         
         Cấu trúc JSON mong muốn:
         [
@@ -65,9 +60,17 @@ function App() {
         ]
       `;
 
-      const result = await model.generateContent([prompt, ...imageParts]);
-      const response = await result.response;
-      const text = response.text();
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: {
+          parts: [
+            ...imageParts,
+            { text: prompt }
+          ]
+        }
+      });
+      
+      const text = response.text;
 
       // Làm sạch chuỗi JSON (đề phòng AI thêm dấu ```json)
       const cleanJson = text.replace(/```json|```/g, "").trim();
@@ -184,102 +187,6 @@ function App() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-export default App;
-
-/* File: src/geminiConfig.js */
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-// 1. Lấy Key
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(API_KEY);
-
-// 2. Hàm chuyển đổi file ảnh sang Base64 (Gemini cần cái này)
-export const fileToGenerativePart = async (file) => {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      resolve({
-        inlineData: {
-          data: reader.result.split(",")[1], // Lấy phần mã hóa sau dấu phẩy
-          mimeType: file.type,
-        },
-      });
-    };
-    reader.readAsDataURL(file);
-  });
-};
-
-// 3. Khởi tạo Model
-export const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-/* File: src/App.jsx */
-import { useState } from 'react';
-import { fileToGenerativePart, model } from './geminiConfig'; // Import từ file cấu hình bước 3
-
-function App() {
-  const [hinhAnh, setHinhAnh] = useState(null);
-  const [ketQua, setKetQua] = useState("");
-  const [dangXuLy, setDangXuLy] = useState(false);
-
-  // Xử lý khi chọn file
-  const chonAnh = (e) => {
-    const file = e.target.files[0];
-    if (file) setHinhAnh(file);
-  };
-
-  // Xử lý gửi lên Gemini
-  const guiYeuCau = async () => {
-    if (!hinhAnh) return alert("Chưa chọn ảnh bạn ơi!");
-
-    setDangXuLy(true);
-    setKetQua("Đang soi ảnh...");
-
-    try {
-      // 1. Chuyển ảnh sang Base64
-      const imagePart = await fileToGenerativePart(hinhAnh);
-
-      // 2. Câu lệnh (Prompt)
-      const prompt = "Hãy nhìn vào bức ảnh này và liệt kê chi tiết các khoản tiền thưởng, tên khoản thưởng và số tiền.";
-
-      // 3. Gửi đi (bao gồm cả Lời nhắn + Ảnh)
-      const result = await model.generateContent([prompt, imagePart]);
-      const response = await result.response;
-      
-      // 4. Nhận kết quả
-      setKetQua(response.text());
-
-    } catch (error) {
-      console.error(error);
-      setKetQua("Lỗi rồi: " + error.message);
-    } finally {
-      setDangXuLy(false);
-    }
-  };
-
-  return (
-    <div style={{ padding: '20px' }}>
-      <h1>Test Nhận Diện Ảnh</h1>
-      
-      {/* Nút chọn ảnh */}
-      <input type="file" accept="image/*" onChange={chonAnh} />
-      
-      {/* Nút gửi */}
-      <button 
-        onClick={guiYeuCau} 
-        disabled={dangXuLy}
-        style={{ marginLeft: '10px', padding: '5px 15px' }}
-      >
-        {dangXuLy ? "Đang chạy..." : "Phân tích"}
-      </button>
-
-      {/* Kết quả */}
-      <div style={{ marginTop: '20px', whiteSpace: 'pre-wrap', background: '#f0f0f0', padding: '10px' }}>
-        {ketQua}
-      </div>
     </div>
   );
 }
