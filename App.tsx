@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -123,6 +124,64 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
         };
         reader.onerror = reject;
         reader.readAsDataURL(blob);
+    });
+};
+
+const processImageForAI = (file: File): Promise<{ base64Data: string; mimeType: string }> => {
+    return new Promise((resolve, reject) => {
+        const MAX_WIDTH = 1024;
+        const reader = new FileReader();
+
+        reader.onload = (event) => {
+            if (!event.target?.result) {
+                return reject(new Error('FileReader did not load the file.'));
+            }
+            const img = new Image();
+            img.src = event.target.result as string;
+
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    return reject(new Error('Could not get canvas context'));
+                }
+
+                let { width, height } = img;
+
+                if (width > MAX_WIDTH) {
+                    height = (MAX_WIDTH / width) * height;
+                    width = MAX_WIDTH;
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                ctx.drawImage(img, 0, 0, width, height);
+
+                canvas.toBlob(
+                    (blob) => {
+                        if (!blob) {
+                            return reject(new Error('Canvas to Blob conversion failed'));
+                        }
+                        const newReader = new FileReader();
+                        newReader.onloadend = () => {
+                            if (newReader.result) {
+                                const base64data = (newReader.result as string).split(',')[1];
+                                resolve({ base64Data: base64data, mimeType: 'image/jpeg' });
+                            } else {
+                                reject(new Error("File reading failed after processing"));
+                            }
+                        };
+                        newReader.onerror = (error) => reject(error);
+                        newReader.readAsDataURL(blob);
+                    },
+                    'image/jpeg',
+                    0.8 // 80% quality for compression
+                );
+            };
+            img.onerror = (error) => reject(error);
+        };
+        reader.onerror = (error) => reject(error);
+        reader.readAsDataURL(file);
     });
 };
 
@@ -1981,13 +2040,13 @@ export const App: React.FC = () => {
 
     try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const prompt = `Từ hình ảnh được cung cấp, hãy trích xuất tất cả các dòng văn bản có chứa số tiền và bắt đầu bằng một trong các cụm từ sau: "Thưởng thi đua", "Khoán công việc", "Thưởng nộp tiền NH", "trợ cấp". Với mỗi dòng tìm thấy, hãy lấy toàn bộ nội dung mô tả và số tiền đi kèm (chỉ lấy số). Bỏ qua tất cả các dòng không liên quan. Trả về kết quả dưới dạng một mảng JSON. Mỗi đối tượng trong mảng phải có hai thuộc tính: "description" (string) và "amount" (number). Nếu không tìm thấy mục nào, trả về một mảng rỗng. Ví dụ: [{"description": "Thưởng thi đua doanh số tháng 5", "amount": 500000}]`;
+        const prompt = `Từ hình ảnh phiếu lương được cung cấp, hãy trích xuất tất cả các dòng là khoản thưởng hoặc trợ cấp. Cụ thể, chỉ tìm các dòng bắt đầu bằng một trong các cụm từ sau: "Thưởng thi đua", "Khoán công việc", "Thưởng nộp tiền NH", "Trợ cấp nộp tiền NH", "Thưởng nóng". Với mỗi dòng tìm thấy, hãy lấy toàn bộ nội dung mô tả và số tiền đi kèm (chỉ lấy số). Bỏ qua tất cả các dòng không liên quan. Trả về kết quả dưới dạng một mảng JSON. Mỗi đối tượng trong mảng phải có hai thuộc tính: "description" (string) và "amount" (number). Nếu không tìm thấy mục nào, trả về một mảng rỗng. Ví dụ: [{"description": "Thưởng thi đua doanh số tháng 5", "amount": 500000}]`;
 
         const imageProcessPromises = bonusImages.map(async (image) => {
-            const base64Data = await blobToBase64(image);
+            const { base64Data, mimeType } = await processImageForAI(image);
             const imagePart = {
                 inlineData: {
-                    mimeType: image.type,
+                    mimeType: mimeType,
                     data: base64Data,
                 },
             };
@@ -2073,7 +2132,7 @@ export const App: React.FC = () => {
 
   // --- Navigation & Rendering ---
   const navItemClasses = (page: Page) => 
-    `flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-white ${
+    `flex items-center gap-2 px-3 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-white ${
         currentPage === page ? 'bg-indigo-100 text-indigo-700' : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
     }`;
     
@@ -2947,7 +3006,7 @@ export const App: React.FC = () => {
             </div>
           );
        case 'tinh-thuong':
-        const employeeShare = (totalBonusFromImage * 0.7) / 3;
+        const employeeShare = employees.length > 0 ? (totalBonusFromImage * 0.7) / employees.length : 0;
         return (
             <div className="w-full max-w-7xl mx-auto space-y-8">
                 <header className="text-center">
