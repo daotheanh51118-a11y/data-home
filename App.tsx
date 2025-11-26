@@ -3485,6 +3485,7 @@ export const App: React.FC = () => {
             Đóng
           </button>
         </footer>
+        </div>
       </form>
       
       {/* Các thẻ đóng của Component cha (có thể bạn còn thiếu mấy cái này nữa) */}
