@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -1182,58 +1183,88 @@ export const App: React.FC = () => {
   };
 
   // --- Kiem Hang Chuyen Kho Logic ---
+  const handleExcelCheckReset = () => {
+    setExcelCheckItems([]);
+    setExcelCheckFileName('');
+    setScanQuery('');
+    setScanStatus({ type: 'idle', message: 'Sẵn sàng quét...' });
+  };
+
   const handleFileImportForExcelCheck = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
 
-    setExcelCheckFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        try {
-            const data = new Uint8Array(e.target?.result as ArrayBuffer);
-            const workbook = window.XLSX.read(data, { type: 'array' });
-            const sheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[sheetName];
-            const json = window.XLSX.utils.sheet_to_json(worksheet, { raw: false });
+    if (files.length > 1) {
+        setExcelCheckFileName(`${files.length} files đã được chọn`);
+    } else {
+        setExcelCheckFileName(files[0].name);
+    }
 
-            const loadedItems: ExcelCheckItem[] = json.map((row: any) => {
-                let productCode = String(findValue(row, ['Mã sản phẩm']) || 'N/A').trim();
-                if (productCode.startsWith("'")) {
-                    productCode = productCode.substring(1);
+    const readFileAsPromise = (file: File): Promise<ExcelCheckItem[]> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target?.result as ArrayBuffer);
+                    const workbook = window.XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const json = window.XLSX.utils.sheet_to_json(worksheet, { raw: false });
+
+                    const loadedItems: ExcelCheckItem[] = json.map((row: any) => {
+                        let productCode = String(findValue(row, ['Mã sản phẩm']) || 'N/A').trim();
+                        if (productCode.startsWith("'")) {
+                            productCode = productCode.substring(1);
+                        }
+                        const productName = findValue(row, ['Tên sản phẩm']);
+                        const quantity = findValue(row, ['Số lượng']);
+                        let imei = findValue(row, ['IMEI_1']);
+                        if (imei) {
+                            imei = String(imei).trim();
+                            if (imei.startsWith("'")) {
+                                imei = imei.substring(1);
+                            }
+                        }
+                        const originalCategory = findValue(row, ['Ngành hàng']);
+                        const derivedCategory = getCategoryFromProductName(String(productName || ''));
+                        const finalCategory = derivedCategory !== 'default'
+                            ? derivedCategory
+                            : String(originalCategory || 'N/A');
+                      
+                        return {
+                            productCode: productCode,
+                            productName: String(productName || 'N/A'),
+                            fileQuantity: Number(String(quantity || 0).replace(/,/g, '')),
+                            actualQuantity: null,
+                            imei: imei ? imei : undefined,
+                            category: finalCategory,
+                        };
+                    });
+                    resolve(loadedItems);
+                } catch (error) {
+                    console.error(`Error reading or parsing file ${file.name}:`, error);
+                    reject(`Lỗi khi xử lý file: ${file.name}. Vui lòng kiểm tra định dạng.`);
                 }
-                const productName = findValue(row, ['Tên sản phẩm']);
-                const quantity = findValue(row, ['Số lượng']);
-                let imei = findValue(row, ['IMEI_1']);
-                if (imei) {
-                    imei = String(imei).trim();
-                    if (imei.startsWith("'")) {
-                        imei = imei.substring(1);
-                    }
-                }
-                const originalCategory = findValue(row, ['Ngành hàng']);
-                const derivedCategory = getCategoryFromProductName(String(productName || ''));
-                const finalCategory = derivedCategory !== 'default'
-                    ? derivedCategory
-                    : String(originalCategory || 'N/A');
-              
-                return {
-                    productCode: productCode,
-                    productName: String(productName || 'N/A'),
-                    fileQuantity: Number(String(quantity || 0).replace(/,/g, '')),
-                    actualQuantity: null,
-                    imei: imei ? imei : undefined,
-                    category: finalCategory,
-                };
-            });
-            setExcelCheckItems(loadedItems);
+            };
+            reader.onerror = () => {
+                reject(`Không thể đọc file: ${file.name}.`);
+            };
+            reader.readAsArrayBuffer(file);
+        });
+    };
+
+    Promise.all(Array.from(files).map(readFileAsPromise))
+        .then(results => {
+            const allItems = results.flat();
+            setExcelCheckItems(allItems);
             setScanStatus({ type: 'idle', message: 'Sẵn sàng quét...' });
             setTimeout(() => scanInputRef.current?.focus(), 100);
-        } catch (error) {
-            console.error("Error reading or parsing Excel file:", error);
-            alert("Lỗi đọc file Excel. Hãy đảm bảo file có các cột bắt buộc: 'Tên sản phẩm', 'Số lượng'. Và các cột tùy chọn: 'Mã sản phẩm', 'IMEI_1', 'Ngành hàng'.");
-        }
-    };
-    reader.readAsArrayBuffer(file);
+        })
+        .catch(error => {
+            alert(error);
+            handleExcelCheckReset();
+        });
+
     event.target.value = '';
   };
   
@@ -1282,12 +1313,7 @@ export const App: React.FC = () => {
 };
 
 
-  const handleExcelCheckReset = () => {
-    setExcelCheckItems([]);
-    setExcelCheckFileName('');
-    setScanQuery('');
-    setScanStatus({ type: 'idle', message: 'Sẵn sàng quét...' });
-  };
+
 
   const handleActualQuantityChange = (index: number, value: string) => {
       const newItems = [...excelCheckItems];
@@ -2548,7 +2574,7 @@ export const App: React.FC = () => {
                                         Nhập từ Excel
                                     </span>
                                 </label>
-                                <input id="excel-check-upload" type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileImportForExcelCheck} />
+                                <input id="excel-check-upload" type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileImportForExcelCheck} multiple />
                                 {excelCheckItems.length > 0 && (
                                     <button onClick={handleExcelCheckReset} className="flex-shrink-0 flex items-center justify-center gap-2 px-4 h-12 bg-[#3498db] text-white font-semibold rounded-lg hover:bg-[#2980b9] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#3498db] focus:ring-offset-white transition-colors duration-200 text-sm">
                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -3451,97 +3477,4 @@ export const App: React.FC = () => {
                     </div>
                 </form>
                 <footer className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end items-center gap-3 flex-shrink-0">
-                    <button type="button" onClick={handleCloseBugReport} className="px-4 py-2 text-sm bg-white text-slate-700 border border-slate-300 font-semibold rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-400">
-                        Hủy
-                    </button>
-                    <button type="submit" form="bug-report-form" onClick={handleBugReportSubmit} className="px-4 py-2 text-sm bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
-                        Gửi Báo Lỗi
-                    </button>
-                </footer>
-            </div>
-        </div>
-    )}
-    
-    {isVipModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={() => setIsVipModalOpen(false)}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                <div className="bg-gradient-to-r from-amber-400 to-yellow-500 p-4 flex justify-between items-center">
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                        <span className="material-symbols-outlined">workspace_premium</span>
-                        Nâng Cấp Tài Khoản VIP
-                    </h2>
-                    <button onClick={() => setIsVipModalOpen(false)} className="text-white/80 hover:text-white transition-colors">
-                        <span className="material-symbols-outlined">close</span>
-                    </button>
-                </div>
-                <div className="p-6 flex flex-col items-center text-center space-y-4">
-                    <p className="text-slate-600 text-sm">
-                        Quét mã QR bên dưới để thanh toán <span className="font-bold text-red-600">10.000đ</span> và sử dụng VIP trong <span className="font-bold text-slate-800">30 ngày</span>.
-                    </p>
-                    
-                    <div className="p-2 border-2 border-amber-200 rounded-xl bg-amber-50">
-                        <img 
-                            src={`https://img.vietqr.io/image/MB-031119939-compact2.png?amount=10000&addInfo=VIP%20${currentUser?.username}&accountName=DAO%20THE%20ANH`}
-                            alt="VietQR MB Bank"
-                            className="w-64 h-64"
-                        />
-                    </div>
-                    <p className="text-xs text-slate-500 max-w-sm">
-                        Nội dung chuyển khoản đã được tạo sẵn. Sau khi thanh toán, nhấn nút "Xác nhận đã thanh toán" để kích hoạt VIP.
-                    </p>
-                </div>
-                 <div className="p-4 bg-slate-50 border-t border-slate-200">
-                    <button 
-                        onClick={handleConfirmVipPayment}
-                        disabled={isVerifyingPayment}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed"
-                    >
-                         {isVerifyingPayment ? (
-                            <>
-                               <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Đang xác thực...
-                            </>
-                        ) : (
-                            "Xác nhận đã thanh toán"
-                        )}
-                    </button>
-                </div>
-            </div>
-        </div>
-    )}
-
-     {qrModalData && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={() => setQrModalData(null)}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                <div className="p-4 flex justify-between items-center border-b border-slate-200">
-                    <h2 className="text-lg font-bold text-slate-800">Chuyển Khoản Thưởng</h2>
-                    <button onClick={() => setQrModalData(null)} className="text-slate-500 hover:text-slate-800 transition-colors">
-                        <span className="material-symbols-outlined">close</span>
-                    </button>
-                </div>
-                <div className="p-6 flex flex-col items-center text-center space-y-4">
-                    <p className="text-slate-600 text-sm">
-                        Quét mã QR để chuyển <span className="font-bold text-red-600">{formatCurrency(qrModalData.amount)}</span> cho <span className="font-bold text-slate-800">{qrModalData.employee.name}</span>.
-                    </p>
-                    
-                    <div className="p-2 border border-slate-200 rounded-lg bg-slate-50">
-                       <img 
-                            src={`https://img.vietqr.io/image/${qrModalData.employee.bankBin}-${qrModalData.employee.accountNumber}-compact2.png?amount=${qrModalData.amount}&addInfo=Thuong%20thang`}
-                            alt={`QR Code for ${qrModalData.employee.name}`}
-                            className="w-64 h-64"
-                        />
-                    </div>
-                    <div className="text-sm text-slate-600">
-                        <p><span className="font-semibold">Ngân hàng:</span> {qrModalData.employee.bank}</p>
-                        <p><span className="font-semibold">STK:</span> {qrModalData.employee.accountNumber}</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    )}
-    </div>
-  );
-};
+                    <button type="button" onClick={handleCloseBugReport} className
