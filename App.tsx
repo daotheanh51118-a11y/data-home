@@ -3477,4 +3477,19 @@ export const App: React.FC = () => {
                     </div>
                 </form>
                 <footer className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end items-center gap-3 flex-shrink-0">
-                    <button type="button" onClick={handleCloseBugReport} className
+                    <button 
+            type="button" 
+            onClick={handleCloseBugReport} 
+            className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 hover:bg-slate-50"
+          >
+            Đóng
+          </button>
+        </footer>
+      </form>
+      
+      {/* Các thẻ đóng của Component cha (có thể bạn còn thiếu mấy cái này nữa) */}
+    </div>
+  );
+}
+
+export default App;
