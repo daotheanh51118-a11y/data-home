@@ -3485,7 +3485,7 @@ export const App: React.FC = () => {
                     Đóng
                   </button>
                 </footer>
-              </div> {/* <--- QUAN TRỌNG: Đây là cái thẻ div bị thiếu mà mình đã thêm vào */}
+              </div> 
             </form>
           </div>
         </div>
