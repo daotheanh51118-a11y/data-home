@@ -3468,29 +3468,60 @@ export const App: React.FC = () => {
                             onChange={handleScreenshotChange}
                             className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
                         />
-                        {bugReportScreenshotPreview && (
-                             <div className="mt-4 p-2 border border-slate-200 rounded-lg inline-block">
-                                <img src={bugReportScreenshotPreview} alt="Xem trước ảnh lỗi" className="max-h-40 rounded" />
-                            </div>
-                        )}
-                        <p className="mt-1.5 text-xs text-slate-500">Vui lòng chụp ảnh màn hình lỗi và tải lên tại đây.</p>
-                    </div>
-                </form>
-                <footer className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end items-center gap-3 flex-shrink-0">
-                    <button 
-                    type="button" 
-                    onClick={handleCloseBugReport} 
-                    className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 hover:bg-slate-50"
-                  >
-                    Đóng
-                  </button>
-                </footer>
-              </div> 
+                        /* --- DÁN ĐÈ ĐOẠN NAY VÀO CUỐI FILE App.tsx (Trước dấu đóng hàm App) --- */
+
+      {/* MODAL BÁO CÁO LỖI */}
+      {isBugReportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden">
+            
+            {/* Header Modal */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-200">
+              <h3 className="text-lg font-semibold text-slate-800">Báo cáo lỗi</h3>
+              <button 
+                onClick={handleCloseBugReport}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <form onSubmit={handleSubmitBugReport}>
+              <div className="p-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Mô tả lỗi</label>
+                  <textarea 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows={4}
+                    placeholder="Vui lòng mô tả chi tiết lỗi bạn gặp phải..."
+                    required
+                  ></textarea>
+                </div>
+              </div>
+
+              {/* Footer Modal */}
+              <div className="flex items-center justify-end gap-3 p-4 bg-slate-50 border-t border-slate-200">
+                <button 
+                  type="button" 
+                  onClick={handleCloseBugReport} 
+                  className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 hover:bg-slate-50 font-medium"
+                >
+                  Hủy bỏ
+                </button>
+                <button 
+                  type="submit" 
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+                >
+                  Gửi báo cáo
+                </button>
+              </div>
             </form>
+
           </div>
         </div>
       )}
-      
+
     </div>
   );
 }
